@@ -16,7 +16,7 @@ eggs/
 .eggs/
 lib/
 lib64/
-parts/
+.streamlit/parts/
 sdist/
 var/
 wheels/
@@ -163,3 +163,4 @@ cython_debug/
 
 # Mac
 .DS_Store
+.streamlit/
