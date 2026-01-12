@@ -2,6 +2,14 @@ import streamlit as st
 import hmac
 import time
 import os
+from typing import Callable, List, Optional
+
+from pseudonymizer import (
+    EntityMapping,
+    InterviewPseudonymizer,
+    pseudonymize_messages,
+)
+PSEUDONYMIZER = InterviewPseudonymizer()
 
 
 PROMPT_INJECTION_PATTERNS = [
@@ -85,8 +93,18 @@ def save_interview_data(
     times_directory,
     file_name_addition_transcript="",
     file_name_addition_time="",
+    mapping_handler: Optional[Callable[[List[EntityMapping]], None]] = None,
 ):
-    """Write interview data (transcript and time) to disk."""
+    """Write interview data to disk after applying privacy-preserving sanitisation.
+
+    The optional `mapping_handler` allows controlled storage of the pseudonymisation
+    table outside of the persisted transcript. When provided it receives a list of
+    `EntityMapping` objects in the order they were first observed.
+    """
+
+    pseudonymized_messages, mappings = pseudonymize_messages(
+        PSEUDONYMIZER, st.session_state.messages
+    )
 
     # Store chat transcript
     with open(
@@ -95,7 +113,7 @@ def save_interview_data(
         ),
         "w",
     ) as t:
-        for message in st.session_state.messages:
+        for message in pseudonymized_messages:
             t.write(f"{message['role']}: {message['content']}\n")
 
     # Store file with start time and duration of interview
@@ -107,6 +125,11 @@ def save_interview_data(
         d.write(
             f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(st.session_state.start_time))}\nInterview duration (minutes): {duration:.2f}"
         )
+
+    if mapping_handler and mappings:
+        mapping_handler(mappings)
+
+    return mappings
 
 
 def detect_prompt_injection_attempt(message):
