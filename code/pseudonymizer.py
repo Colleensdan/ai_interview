@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import spacy
 from spacy.language import Language
-from spacy.tokens import Span
+from spacy.lang.en.stop_words import STOP_WORDS
+from spacy.tokens import Doc, Span
 
 
 # Mapping derived from spaCy entity labels to placeholders requested by governance.
@@ -64,6 +65,18 @@ FACILITY_TYPE_KEYWORDS = {
 DATE_YEAR_PATTERN = re.compile(r"\b(1[89]\d{2}|20\d{2}|21\d{2})\b")
 
 
+WORD_START_PATTERN = re.compile(r"\b[a-z][a-z'\-]*")
+
+
+STOPWORDS = {word.lower() for word in STOP_WORDS}
+
+
+NAME_FALLBACK_PATTERN = re.compile(
+    r"\b(?:my\s+name\s+is|name\s*[:=])\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,3})",
+    re.IGNORECASE,
+)
+
+
 @dataclass
 class EntityMapping:
     """Record of how a specific entity was pseudonymised."""
@@ -113,9 +126,18 @@ class InterviewPseudonymizer:
             return text
 
         doc = self._nlp(text)
+        entities = list(doc.ents)
         replacements: List[Tuple[int, int, str]] = []
 
-        for ent in doc.ents:
+        if entities:
+            occupied = {(ent.start_char, ent.end_char) for ent in entities}
+        else:
+            occupied = set()
+
+        entities.extend(self._case_normalised_entities(doc, text, occupied))
+        entities.extend(self._supplement_person_entities(doc, occupied))
+
+        for ent in entities:
             placeholder = self._placeholder_for_entity(ent)
             if not placeholder:
                 continue
@@ -134,6 +156,57 @@ class InterviewPseudonymizer:
         """Expose anonymisation mappings for optional governance storage."""
 
         return list(self._entity_memory.values())
+
+    def _supplement_person_entities(
+        self, doc: Doc, seen_ranges: Set[Tuple[int, int]]
+    ) -> List[Span]:
+        """Return PERSON spans derived from explicit self-disclosure patterns."""
+
+        extra_spans: List[Span] = []
+        text = doc.text
+
+        for match in NAME_FALLBACK_PATTERN.finditer(text):
+            start = match.start("name")
+            end = match.end("name")
+            if (start, end) in seen_ranges:
+                continue
+
+            span = doc.char_span(start, end, label="PERSON", alignment_mode="contract")
+            if not span:
+                continue
+
+            cleaned = span.text.strip().strip(",.;:!?")
+            if not cleaned:
+                continue
+
+            seen_ranges.add((start, end))
+            extra_spans.append(span)
+
+        return extra_spans
+
+    def _case_normalised_entities(
+        self, doc: Doc, text: str, seen_ranges: Set[Tuple[int, int]]
+    ) -> List[Span]:
+        """Augment detections by capitalising word starts before running NER again."""
+
+        fallback_text = _capitalise_candidate_words(text)
+        if fallback_text == text:
+            return []
+
+        fallback_doc = self._nlp(fallback_text)
+        extra_spans: List[Span] = []
+
+        for ent in fallback_doc.ents:
+            start, end = ent.start_char, ent.end_char
+            if (start, end) in seen_ranges:
+                continue
+            span = doc.char_span(start, end, label=ent.label_, alignment_mode="contract")
+            if not span:
+                continue
+            seen_ranges.add((start, end))
+            extra_spans.append(span)
+
+        return extra_spans
 
     def _placeholder_for_entity(self, ent: Span) -> Optional[str]:
         label = ent.label_
@@ -210,4 +283,56 @@ def pseudonymize_messages(
             }
         )
 
-    return transformed, pseudonymizer.export_mappings()
+    mappings = pseudonymizer.export_mappings()
+    retrofitted = _apply_mappings_to_messages(transformed, mappings)
+    return retrofitted, mappings
+
+
+def _capitalise_candidate_words(text: str) -> str:
+    """Uppercase the first letter of likely proper nouns while preserving spacing."""
+
+    def _replacement(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if len(word) <= 2:
+            return word
+        if word in STOPWORDS:
+            return word
+        return word[0].upper() + word[1:]
+
+    transformed = WORD_START_PATTERN.sub(_replacement, text)
+    return re.sub(r"^[a-z]", lambda match: match.group().upper(), transformed, count=1)
+
+
+def _build_mapping_pattern(original: str) -> Optional[re.Pattern[str]]:
+    if not original:
+        return None
+
+    escaped = re.escape(original)
+    prefix = r"\b" if original[0].isalnum() else ""
+    suffix = r"\b" if original[-1].isalnum() else ""
+    return re.compile(f"{prefix}{escaped}{suffix}", flags=re.IGNORECASE)
+
+
+def _apply_mappings_to_messages(
+    messages: List[Dict[str, str]], mappings: Sequence[EntityMapping]
+) -> List[Dict[str, str]]:
+    if not mappings:
+        return messages
+
+    patterns: List[Tuple[re.Pattern[str], str]] = []
+    for mapping in mappings:
+        pattern = _build_mapping_pattern(mapping.original)
+        if pattern:
+            patterns.append((pattern, mapping.placeholder))
+
+    if not patterns:
+        return messages
+
+    transformed: List[Dict[str, str]] = []
+    for message in messages:
+        content = message["content"]
+        for pattern, replacement in patterns:
+            content = pattern.sub(replacement, content)
+        transformed.append({"role": message["role"], "content": content})
+
+    return transformed
