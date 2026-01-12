@@ -30,6 +30,10 @@ Recent updates add guardrails so the model stays aligned with the study protocol
 - Every respondent message is flagged as untrusted before it reaches the model, and the upstream system prompt is always inserted first to keep higher authority than user inputs.
 - A prompt-injection detector blocks common jailbreak attempts (e.g., “ignore previous instructions”, “show your chain of thought”, “unaligned”) and responds with a generic refusal before continuing the interview.
 
+## Interview data pseudonymisation
+
+Interview transcripts are now sanitised immediately before they touch disk. The pipeline uses spaCy NER plus light rule logic to replace directly identifying entities with placeholders (e.g. `<name>`, `<organisation>`, `<place>`, `<group>`, `<date-2023>`). Named facilities are generalised to their type (`<hospital>`, `<airport>`), while generic mentions such as “a hospital” are left untouched so analytics remain meaningful. If governance teams need reversible audits, pass a `mapping_handler` to `save_interview_data` to persist the optional mapping table outside the stored transcript. Install the dependency stack by running `pip install -r code/requirements.txt` followed by `python -m spacy download en_core_web_sm` when setting up a new environment.
+
 
 ## Paper and citation
 
