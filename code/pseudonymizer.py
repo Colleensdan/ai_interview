@@ -72,6 +72,11 @@ WORD_START_PATTERN = re.compile(r"\b[a-z][a-z'\-]*")
 STOPWORDS = {word.lower() for word in STOP_WORDS}
 
 
+EMAIL_PATTERN = re.compile(
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+)
+
+
 NAME_FALLBACK_PATTERN = re.compile(
     r"\b(?:my\s+name\s+is|name\s*[:=])\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,3})",
     re.IGNORECASE,
@@ -137,6 +142,8 @@ class InterviewPseudonymizer:
 
         entities.extend(self._case_normalised_entities(doc, text, occupied))
         entities.extend(self._supplement_person_entities(doc, occupied))
+        entities.extend(self._supplement_email_entities(doc, occupied))
+        entities = [self._normalise_email_entity(doc, ent) for ent in entities]
 
         for ent in entities:
             placeholder = self._placeholder_for_entity(ent)
@@ -185,6 +192,29 @@ class InterviewPseudonymizer:
 
         return extra_spans
 
+    def _supplement_email_entities(
+        self, doc: Doc, seen_ranges: Set[Tuple[int, int]]
+    ) -> List[Span]:
+        """Return EMAIL spans detected via pattern matching."""
+
+        extra_spans: List[Span] = []
+        label_id = self._ensure_email_label(doc)
+        text = doc.text
+
+        for match in EMAIL_PATTERN.finditer(text):
+            start, end = match.span()
+            if (start, end) in seen_ranges:
+                continue
+            span = doc.char_span(
+                start, end, label=label_id, alignment_mode="contract"
+            )
+            if not span:
+                continue
+            seen_ranges.add((start, end))
+            extra_spans.append(span)
+
+        return extra_spans
+
     def _case_normalised_entities(
         self, doc: Doc, text: str, seen_ranges: Set[Tuple[int, int]]
     ) -> List[Span]:
@@ -211,6 +241,9 @@ class InterviewPseudonymizer:
 
     def _placeholder_for_entity(self, ent: Span) -> Optional[str]:
         label = ent.label_
+
+        if label == "EMAIL":
+            return "<email address>"
 
         if label == "DATE":
             return self._date_placeholder(ent)
@@ -246,6 +279,17 @@ class InterviewPseudonymizer:
 
     def _normalised_key(self, ent: Span) -> str:
         return f"{ent.label_}:{ent.text.strip().lower()}"
+
+    def _normalise_email_entity(self, doc: Doc, ent: Span) -> Span:
+        text = ent.text.strip()
+        if EMAIL_PATTERN.fullmatch(text):
+            label_id = self._ensure_email_label(doc)
+            return Span(doc, ent.start, ent.end, label=label_id)
+        return ent
+
+    @staticmethod
+    def _ensure_email_label(doc: Doc) -> int:
+        return doc.vocab.strings.add("EMAIL")
 
     @staticmethod
     def _apply_replacements(text: str, replacements: List[Tuple[int, int, str]]) -> str:
