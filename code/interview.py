@@ -244,61 +244,44 @@ if st.session_state.interview_active:
             with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
                 st.markdown(message_respondent)
 
-            warning_message = (
-                "I must follow the study instructions and cannot comply with requests "
-                f"such as '{injection_pattern}'. Please rephrase your answer."
+            refusal_message = (
+                "I must follow the study instructions exactly and cannot comply with that "
+                "request. Please continue by sharing more about your education or "
+                "occupation choices."
             )
             with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
-                st.markdown(warning_message)
+                st.markdown(refusal_message)
 
             st.session_state.messages.append(
-                {"role": "assistant", "content": warning_message}
+                {"role": "assistant", "content": refusal_message}
             )
 
-            st.stop()
+        else:
 
-        st.session_state.messages.append(
-            {"role": "user", "content": message_respondent}
-        )
+            st.session_state.messages.append(
+                {"role": "user", "content": message_respondent}
+            )
 
-        # Display respondent message
-        with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
-            st.markdown(message_respondent)
+            # Display respondent message
+            with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
+                st.markdown(message_respondent)
 
-        # Generate and display interviewer message
-        with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
+            # Generate and display interviewer message
+            with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
 
-            # Create placeholder for message in chat interface
-            message_placeholder = st.empty()
+                # Create placeholder for message in chat interface
+                message_placeholder = st.empty()
 
-            # Initialise message of interviewer
-            message_interviewer = ""
+                # Initialise message of interviewer
+                message_interviewer = ""
 
-            if api == "openai":
+                if api == "openai":
 
-                # Stream responses
-                stream = client.chat.completions.create(**_prepare_api_kwargs())
+                    # Stream responses
+                    stream = client.chat.completions.create(**_prepare_api_kwargs())
 
-                for message in stream:
-                    text_delta = message.choices[0].delta.content
-                    if text_delta != None:
-                        message_interviewer += text_delta
-                    # Start displaying message only after 5 characters to first check for codes
-                    if len(message_interviewer) > 5:
-                        message_placeholder.markdown(message_interviewer + "▌")
-                    if any(
-                        code in message_interviewer
-                        for code in config.CLOSING_MESSAGES.keys()
-                    ):
-                        # Stop displaying the progress of the message in case of a code
-                        message_placeholder.empty()
-                        break
-
-            elif api == "anthropic":
-
-                # Stream responses
-                with client.messages.stream(**_prepare_api_kwargs()) as stream:
-                    for text_delta in stream.text_stream:
+                    for message in stream:
+                        text_delta = message.choices[0].delta.content
                         if text_delta != None:
                             message_interviewer += text_delta
                         # Start displaying message only after 5 characters to first check for codes
@@ -312,31 +295,49 @@ if st.session_state.interview_active:
                             message_placeholder.empty()
                             break
 
-            # If no code is in the message, display and store the message
-            if not any(
-                code in message_interviewer for code in config.CLOSING_MESSAGES.keys()
-            ):
+                elif api == "anthropic":
 
-                message_placeholder.markdown(message_interviewer)
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": message_interviewer}
-                )
+                    # Stream responses
+                    with client.messages.stream(**_prepare_api_kwargs()) as stream:
+                        for text_delta in stream.text_stream:
+                            if text_delta != None:
+                                message_interviewer += text_delta
+                            # Start displaying message only after 5 characters to first check for codes
+                            if len(message_interviewer) > 5:
+                                message_placeholder.markdown(message_interviewer + "▌")
+                            if any(
+                                code in message_interviewer
+                                for code in config.CLOSING_MESSAGES.keys()
+                            ):
+                                # Stop displaying the progress of the message in case of a code
+                                message_placeholder.empty()
+                                break
 
-                # Regularly store interview progress as backup, but prevent script from
-                # stopping in case of a write error
-                try:
+                # If no code is in the message, display and store the message
+                if not any(
+                    code in message_interviewer for code in config.CLOSING_MESSAGES.keys()
+                ):
 
-                    save_interview_data(
-                        username=st.session_state.username,
-                        transcripts_directory=config.BACKUPS_DIRECTORY,
-                        times_directory=config.BACKUPS_DIRECTORY,
-                        file_name_addition_transcript=f"_transcript_started_{st.session_state.start_time_file_names}",
-                        file_name_addition_time=f"_time_started_{st.session_state.start_time_file_names}",
+                    message_placeholder.markdown(message_interviewer)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": message_interviewer}
                     )
 
-                except:
+                    # Regularly store interview progress as backup, but prevent script from
+                    # stopping in case of a write error
+                    try:
 
-                    pass
+                        save_interview_data(
+                            username=st.session_state.username,
+                            transcripts_directory=config.BACKUPS_DIRECTORY,
+                            times_directory=config.BACKUPS_DIRECTORY,
+                            file_name_addition_transcript=f"_transcript_started_{st.session_state.start_time_file_names}",
+                            file_name_addition_time=f"_time_started_{st.session_state.start_time_file_names}",
+                        )
+
+                    except:
+
+                        pass
 
             # If code in the message, display the associated closing message instead
             # Loop over all codes
