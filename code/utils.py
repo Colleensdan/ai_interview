@@ -4,6 +4,26 @@ import time
 import os
 
 
+PROMPT_INJECTION_PATTERNS = [
+    "ignore previous instructions",
+    "disregard previous instructions",
+    "forget all prior instructions",
+    "pretend to be",
+    "you are now",
+    "begin system prompt",
+    "system prompt:",
+    "override the system",
+    "replace the system instructions",
+    "chain of thought",
+    "full chain of thought",
+    "show your chain of thought",
+    "show your reasoning",
+    "full reasoning process",
+    "thinking process",
+    "unaligned",
+]
+
+
 # Password screen for dashboard (note: only very basic authentication!)
 # Based on https://docs.streamlit.io/knowledge-base/deploy/authentication-without-sso
 def check_password():
@@ -87,3 +107,13 @@ def save_interview_data(
         d.write(
             f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(st.session_state.start_time))}\nInterview duration (minutes): {duration:.2f}"
         )
+
+
+def detect_prompt_injection_attempt(message):
+    """Return the matched pattern if message looks like a prompt-injection attempt."""
+
+    lowered = message.lower()
+    for pattern in PROMPT_INJECTION_PATTERNS:
+        if pattern in lowered:
+            return pattern
+    return None
