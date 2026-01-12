@@ -43,6 +43,7 @@ GENERIC_FACILITY_TERMS = {
     "terminal",
     "university",
     "warehouse",
+    "field",
 }
 
 
