@@ -6,7 +6,33 @@ from utils import (
     save_interview_data,
 )
 import os
+from pathlib import Path
+import tomllib
 import config
+
+
+def _load_api_key(secret_name, env_var):
+    """Return an API key from Streamlit secrets, env vars, or local secrets file."""
+
+    try:
+        return st.secrets[secret_name]
+    except (KeyError, FileNotFoundError):
+        pass
+
+    env_value = os.getenv(env_var)
+    if env_value:
+        return env_value
+
+    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+    if secrets_path.exists():
+        with secrets_path.open("rb") as secrets_file:
+            secrets_data = tomllib.load(secrets_file)
+        if secret_name in secrets_data:
+            return secrets_data[secret_name]
+
+    raise RuntimeError(
+        f"Missing API key. Set '{secret_name}' in Streamlit secrets, define '{env_var}', or add it to {secrets_path}."
+    )
 
 # Load API library
 if "gpt" in config.MODEL.lower():
@@ -106,10 +132,12 @@ for message in st.session_state.messages[1:]:
 
 # Load API client
 if api == "openai":
-    client = OpenAI(api_key=st.secrets["API_KEY_OPENAI"])
+    client = OpenAI(api_key=_load_api_key("API_KEY_OPENAI", "OPENAI_API_KEY"))
     api_kwargs = {"stream": True}
 elif api == "anthropic":
-    client = anthropic.Anthropic(api_key=st.secrets["API_KEY_ANTHROPIC"])
+    client = anthropic.Anthropic(
+        api_key=_load_api_key("API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY")
+    )
     api_kwargs = {"system": config.SYSTEM_PROMPT}
 
 # API kwargs
