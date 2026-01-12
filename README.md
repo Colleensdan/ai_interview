@@ -22,6 +22,14 @@ The interview platform is built using the library `streamlit` and the APIs of Op
 - Activate the environment with `conda activate interviews`
 - Start the platform with `streamlit run interview.py`
 
+## Security hardening
+
+Recent updates add guardrails so the model stays aligned with the study protocol:
+
+- API keys can now be supplied via Streamlit secrets, environment variables, or a local `.streamlit/secrets.toml`, making misconfiguration less likely.
+- Every respondent message is flagged as untrusted before it reaches the model, and the upstream system prompt is always inserted first to keep higher authority than user inputs.
+- A prompt-injection detector blocks common jailbreak attempts (e.g., “ignore previous instructions”, “show your chain of thought”, “unaligned”) and responds with a generic refusal before continuing the interview.
+
 
 ## Paper and citation
 
