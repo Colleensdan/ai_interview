@@ -29,10 +29,21 @@ Recent updates add guardrails so the model stays aligned with the study protocol
 - API keys can now be supplied via Streamlit secrets, environment variables, or a local `.streamlit/secrets.toml`, making misconfiguration less likely.
 - Every respondent message is flagged as untrusted before it reaches the model, and the upstream system prompt is always inserted first to keep higher authority than user inputs.
 - A prompt-injection detector blocks common jailbreak attempts (e.g., “ignore previous instructions”, “show your chain of thought”, “unaligned”) and responds with a generic refusal before continuing the interview.
+- The chat input blocks paste events to ensure respondents type responses directly rather than pasting prepared text.
 
 ## Interview data pseudonymisation
 
 Interview transcripts are now sanitised immediately before they touch disk. The pipeline uses spaCy NER plus light rule logic to replace directly identifying entities with placeholders (e.g. `<name>`, `<organisation>`, `<place>`, `<group>`, `<date-2023>`). Named facilities are generalised to their type (`<hospital>`, `<airport>`), while generic mentions such as “a hospital” are left untouched so analytics remain meaningful. If governance teams need reversible audits, pass a `mapping_handler` to `save_interview_data` to persist the optional mapping table outside the stored transcript. Install the dependency stack by running `pip install -r code/requirements.txt` followed by `python -m spacy download en_core_web_sm` when setting up a new environment.
+
+### Mapping export (beta)
+
+There is an experimental (beta) CLI flow for persisting pseudonymisation mapping tables to disk for governance review:
+
+- Enable mappings with `streamlit run interview.py -- --enable-mapping`. This attempts to write JSON mapping files to `secure/audit/mapping/` alongside the repo.
+- Override the destination via `--mapping-dir /path/to/folder` or the environment variable `AI_INTERVIEW_MAPPING_DIR`. You can also flip the feature on via `AI_INTERVIEW_ENABLE_MAPPING=1` instead of the CLI flag.
+- Each interview save writes `{username}_{timestamp}.json` files containing the reversible mappings observed during that run.
+
+**Known issue (incomplete):** the current implementation does not yet reliably create the default `secure/audit/mapping/` directory or persist JSON files there. Treat this feature as beta-only until the underlying path-resolution bug is fixed.
 
 
 ## Paper and citation

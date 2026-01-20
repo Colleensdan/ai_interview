@@ -126,7 +126,7 @@ def save_interview_data(
             f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(st.session_state.start_time))}\nInterview duration (minutes): {duration:.2f}"
         )
 
-    if mapping_handler and mappings:
+    if mapping_handler:
         mapping_handler(mappings)
 
     return mappings
