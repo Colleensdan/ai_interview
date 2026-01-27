@@ -1,13 +1,71 @@
 from pathlib import Path
 import streamlit as st
+from dataclasses import dataclass
 
-INTERVIEW_PROMPT = st.secrets["INTERVIEW_PROMPT"]
+
+ALLOWED_VARIANTS = {"deforestation", "combustion"}
+
+@dataclass(frozen=True)
+class AppConfig:
+    variant: str
+
+def _as_bool(v, default: bool) -> bool:
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def load_config() -> AppConfig:
+    # Variant chosen by URL
+    variant = st.query_params.get("variant", "deforestation")
+
+    if variant not in ALLOWED_VARIANTS:
+        raise ValueError(
+            f"Invalid variant '{variant}'. "
+            f"Allowed variants: {sorted(ALLOWED_VARIANTS)}"
+        )
+
+    variants = st.secrets.get("variants")
+    if not variants or variant not in variants:
+        raise RuntimeError(
+            f"Missing secrets for variant '{variant}'"
+        )
+
+    vcfg = variants[variant]
+
+    return AppConfig(
+        variant=variant
+    )
+
+
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
 prompts_dir = PROJECT_ROOT / "prompts" 
+
+"""
 # Interview outline
 
+
+try:
+    cfg = load_config()
+except Exception as e:
+    st.error("Configuration error")
+    st.code(str(e))
+    st.stop()
+
+st.sidebar.caption(f"Variant: {cfg.variant}")
+
+
+#INTERVIEW PROMPTS 
+if cfg.variant == "deforestation":
+    INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
+elif cfg.variant == "combustion_engine":
+    INTERVIEW_OUTLINE = prompts_dir / "combustion_engine.txt"
+else:
+    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+"""
+
+"""""
 if INTERVIEW_PROMPT == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
 
@@ -16,6 +74,8 @@ elif INTERVIEW_PROMPT == "combustion_engine":
 
 else:
     raise ValueError(f"Unknown INTERVIEW_PROMPT: {INTERVIEW_PROMPT}")
+
+"""
 
 # General instructions
 GENERAL_INSTRUCTIONS = """General Instructions:
@@ -50,6 +110,16 @@ CLOSING_MESSAGES["x7y8"] = (
 )
 
 
+cfg = load_config()
+
+if cfg.variant == "deforestation":
+    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
+elif cfg.variant == "combustion":
+    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
+else:
+    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+
+
 # System prompt
 SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
@@ -61,7 +131,7 @@ SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
 # API parameters
-MODEL = "gpt-4o-2024-05-13"  # or e.g. "claude-3-5-sonnet-20240620" (OpenAI GPT or Anthropic Claude models)
+MODEL = "gpt-5-mini"  # or e.g. "claude-3-5-sonnet-20240620" (OpenAI GPT or Anthropic Claude models)
 TEMPERATURE = None  # (None for default value)
 MAX_OUTPUT_TOKENS = 2048
 
