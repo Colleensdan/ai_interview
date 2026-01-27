@@ -29,12 +29,7 @@ except Exception as e:
     st.stop()
 
 
-if cfg.variant == "deforestation":
-    INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
-elif cfg.variant == "combustion":
-    INTERVIEW_OUTLINE = prompts_dir / "combustion_engine.txt"
-else:
-    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+SYSTEM_PROMPT = config.SYSTEM_PROMPT
 
 
 st.markdown(
@@ -252,7 +247,7 @@ def _build_messages_for_api(include_system):
 
     messages = []
     if include_system:
-        messages.append({"role": "system", "content": config.SYSTEM_PROMPT})
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
     for message in st.session_state.messages:
         if message["role"] == "system":
@@ -260,7 +255,7 @@ def _build_messages_for_api(include_system):
         messages.append(_sanitize_message_for_api(message))
 
     if include_system and not messages:
-        messages.append({"role": "system", "content": config.SYSTEM_PROMPT})
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
     return messages
 
