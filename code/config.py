@@ -3,7 +3,11 @@ import streamlit as st
 from dataclasses import dataclass
 
 
-ALLOWED_VARIANTS = {"deforestation", "combustion"}
+VARIANT_TOKENS = {
+    "T5wp7": "combustion",
+    "D9k2m": "deforestation",
+}
+ALLOWED_VARIANTS = set(VARIANT_TOKENS.values())
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -15,13 +19,16 @@ def _as_bool(v, default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 def load_config() -> AppConfig:
-    # Variant chosen by URL
-    variant = st.query_params.get("variant", "deforestation")
+    # Variant chosen by URL (nondescript token)
+    token = st.query_params.get("q")
+    if token is None:
+        variant = "deforestation"
+    else:
+        variant = VARIANT_TOKENS.get(token)
 
     if variant not in ALLOWED_VARIANTS:
         raise ValueError(
-            f"Invalid variant '{variant}'. "
-            f"Allowed variants: {sorted(ALLOWED_VARIANTS)}"
+            f"Invalid variant token '{token}'."
         )
 
     """
