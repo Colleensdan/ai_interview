@@ -11,9 +11,11 @@ prompts_dir = PROJECT_ROOT / "prompts"
 if INTERVIEW_PROMPT == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
 
-if INTERVIEW_PROMPT == "combusion_engine":
-    INTERVIEW_OUTLINE = prompts_dir / "combusion_engine.txt"
+elif INTERVIEW_PROMPT == "combustion_engine":
+    INTERVIEW_OUTLINE = prompts_dir / "combustion_engine.txt"
 
+else:
+    raise ValueError(f"Unknown INTERVIEW_PROMPT: {INTERVIEW_PROMPT}")
 
 # General instructions
 GENERAL_INSTRUCTIONS = """General Instructions:
