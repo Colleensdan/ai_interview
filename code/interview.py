@@ -29,7 +29,18 @@ except Exception as e:
     st.stop()
 
 
-SYSTEM_PROMPT = config.SYSTEM_PROMPT
+if cfg.variant == "deforestation":
+    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
+elif cfg.variant == "combustion":
+    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
+else:
+    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+
+SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
+
+{config.GENERAL_INSTRUCTIONS}
+
+{config.CODES}"""
 
 
 st.markdown(
