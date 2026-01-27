@@ -24,18 +24,20 @@ def load_config() -> AppConfig:
             f"Allowed variants: {sorted(ALLOWED_VARIANTS)}"
         )
 
+    """
     variants = st.secrets.get("variants")
     if not variants or variant not in variants:
         raise RuntimeError(
             f"Missing secrets for variant '{variant}'"
         )
+     
 
     vcfg = variants[variant]
+    """   
 
     return AppConfig(
         variant=variant
     )
-
 
 
 HERE = Path(__file__).resolve().parent
@@ -53,7 +55,6 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-st.sidebar.caption(f"Variant: {cfg.variant}")
 
 
 #INTERVIEW PROMPTS 
@@ -65,7 +66,8 @@ else:
     raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
 """
 
-"""""
+
+""""
 if INTERVIEW_PROMPT == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
 
