@@ -221,14 +221,17 @@ MAPPING_HANDLER = _persist_mapping if _MAPPING_DIR else None
 def _load_api_key(secret_name, env_var):
     """Return an API key from Streamlit secrets, env vars, or local secrets file."""
 
+
+    env_value = os.getenv(env_var)
+    if env_value:
+        return env_value
+
     try:
         return st.secrets[secret_name]
     except (KeyError, FileNotFoundError):
         pass
 
-    env_value = os.getenv(env_var)
-    if env_value:
-        return env_value
+
 
     secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
     if secrets_path.exists():
