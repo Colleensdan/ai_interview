@@ -13,6 +13,11 @@ from utils import (
 import os
 from pathlib import Path
 import tomllib
+from openai import AzureOpenAI, APIError
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 st.set_page_config(page_title="Interview", page_icon="🎓")
 
@@ -218,31 +223,22 @@ def _persist_mapping(mappings):
 MAPPING_HANDLER = _persist_mapping if _MAPPING_DIR else None
 
 
-def _load_api_key(secret_name, env_var):
-    """Return an API key from Streamlit secrets, env vars, or local secrets file."""
+def _load_api_key():
+    """Return an API key from local env"""
+    api_key = os.getenv("CJBS_API_KEY")
+    api_endpoint = os.getenv("CJBS_API_ENDPOINT")
+    api_version = os.getenv("CJBS_API_VERSION", "2023-05-15")
+    deployment_name = os.getenv("CJBS_DEPLOYMENT_NAME")
 
+    if not api_key or not api_endpoint:
+        raise ValueError("Please set CJBS_API_KEY and CJBS_API_ENDPOINT in your .env file.")
+        
 
-    env_value = os.getenv(env_var)
-    if env_value:
-        return env_value
+    if not deployment_name:
+        raise ValueError("Error: Please set CJBS_DEPLOYMENT_NAME in your .env file (e.g., 'gpt-4.1').")
+        
 
-    try:
-        return st.secrets[secret_name]
-    except (KeyError, FileNotFoundError):
-        pass
-
-
-
-    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
-    if secrets_path.exists():
-        with secrets_path.open("rb") as secrets_file:
-            secrets_data = tomllib.load(secrets_file)
-        if secret_name in secrets_data:
-            return secrets_data[secret_name]
-
-    raise RuntimeError(
-        f"Missing API key. Set '{secret_name}' in Streamlit secrets, define '{env_var}', or add it to {secrets_path}."
-    )
+    return api_key, api_endpoint, api_version, deployment_name
 
 
 def _sanitize_message_for_api(message):
@@ -277,8 +273,11 @@ def _build_messages_for_api(include_system):
 def _prepare_api_kwargs():
     """Build API kwargs with sanitized message order."""
 
+    # Use deployment name for Azure OpenAI, otherwise use config.MODEL
+    model_or_deployment = _DEPLOYMENT_NAME if api == "openai" and '_DEPLOYMENT_NAME' in globals() else config.MODEL
+
     kwargs = {
-    "model": config.MODEL,
+    "model": model_or_deployment,
     "max_completion_tokens": config.MAX_OUTPUT_TOKENS,
     }
 
@@ -429,9 +428,19 @@ for message in st.session_state.messages[1:]:
         with st.chat_message(message["role"], avatar=avatar):
             st.markdown(message["content"])
 
+# Load API credentials once
+api_key, api_endpoint, api_version, deployment_name = _load_api_key()
+
+# Store deployment name for use in API calls
+_DEPLOYMENT_NAME = deployment_name
+
 # Load API client
 if api == "openai":
-    client = OpenAI(api_key=_load_api_key("API_KEY_OPENAI", "OPENAI_API_KEY"))
+    client = AzureOpenAI(
+        api_key=api_key,
+        api_version=api_version,
+        azure_endpoint=api_endpoint
+    )
 elif api == "anthropic":
     client = anthropic.Anthropic(
         api_key=_load_api_key("API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY")
