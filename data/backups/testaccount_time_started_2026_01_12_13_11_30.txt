@@ -1,0 +1,2 @@
+Start time (UTC): 12/01/2026 13:11:30
+Interview duration (minutes): 0.08

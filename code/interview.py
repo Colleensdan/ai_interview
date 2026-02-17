@@ -536,9 +536,11 @@ if st.session_state.interview_active:
                     stream = client.chat.completions.create(**_prepare_api_kwargs())
 
                     for message in stream:
-                        text_delta = message.choices[0].delta.content
-                        if text_delta != None:
-                            message_interviewer += text_delta
+                        # Check if choices exist in this chunk
+                        if message.choices and len(message.choices) > 0:
+                            text_delta = message.choices[0].delta.content
+                            if text_delta != None:
+                                message_interviewer += text_delta
                         # Start displaying message only after 5 characters to first check for codes
                         if len(message_interviewer) > 5:
                             message_placeholder.markdown(message_interviewer + "▌")
