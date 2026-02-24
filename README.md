@@ -57,6 +57,92 @@ There is an experimental (beta) CLI flow for persisting pseudonymisation mapping
 **Known issue (incomplete):** the current implementation does not yet reliably create the default `secure/audit/mapping/` directory or persist JSON files there. Treat this feature as beta-only until the underlying path-resolution bug is fixed.
 
 
+## Qualtrics integration (participant ID handoff)
+
+The app receives a unique Qualtrics ResponseID from the survey platform and uses it as the filename for all stored interview data. This links each transcript unambiguously to a Qualtrics response record without storing any personally identifiable information.
+
+### How participant IDs are assigned
+
+| Source | Stored as |
+|---|---|
+| Qualtrics `?pid=<ResponseID>` in iframe URL | `<ResponseID>.txt` (e.g. `R_1a2b3c4d.txt`) |
+| Direct URL visit (no `pid`) | `non-qualtrics-participant-YYYYMMDD_HHMMSS.txt` |
+
+The ID is locked in for the entire session the moment the page first loads. It cannot change mid-interview.
+
+### Required Qualtrics JS (recommended approach)
+
+The most reliable method is to append `pid` directly to the iframe `src` URL before the frame loads. Streamlit reads it from `st.query_params` on the very first Python execution — no JavaScript timing dependency.
+
+Replace your existing Qualtrics JS with:
+
+```javascript
+Qualtrics.SurveyEngine.addOnReady(function() {
+    var resID = "${e://Field/ResponseID}";
+    var iframe = document.getElementById('ai-interview-frame');
+
+    // Primary: append pid to the iframe URL so Streamlit reads it server-side
+    // on first load — reliable regardless of JS timing.
+    var src = iframe.src || iframe.getAttribute('src') || '';
+    if (src && resID) {
+        var sep = src.indexOf('?') !== -1 ? '&' : '?';
+        iframe.src = src + sep + 'pid=' + encodeURIComponent(resID);
+    }
+
+    // Fallback: also send a postMessage after load (caught by the Streamlit
+    // listener if it has had time to register, causing a redirect with ?pid=).
+    iframe.onload = function() {
+        iframe.contentWindow.postMessage(
+            { type: 'QUALTRICS_ID', participantId: resID },
+            'https://ai-interview-en11.onrender.com'
+        );
+    };
+});
+```
+
+### Why two mechanisms?
+
+The Streamlit app also contains a JavaScript `postMessage` listener (`_register_qualtrics_listener` in `interview.py`). If the listener receives a `QUALTRICS_ID` message and the URL does not yet contain `?pid=`, it performs a `location.replace` redirect that appends the ID and restarts the session with the correct filename.
+
+However, Streamlit's component iframes render *after* the page's `load` event fires, so the listener may not be active in time to catch the very first postMessage. The URL parameter approach has no such timing dependency and should always be used as the primary method. The postMessage listener is belt-and-suspenders.
+
+## SharePoint storage (Render deployment)
+
+When hosted on Render, interview data is written to **both** the server's local disk and a SharePoint Online document library via the Microsoft Graph API. Local disk on Render is ephemeral — files are lost on any restart or redeploy — so SharePoint is the durable copy.
+
+### How it works
+
+Every call to `save_interview_data` (backups during the interview, the final transcript, and the quit path) uploads two files to SharePoint immediately after writing them locally:
+
+- `{username}.txt` — pseudonymised transcript
+- `{username}.txt` — start time and duration
+
+Files land in the configured document library folder (e.g. `InterviewData/incoming/`).
+
+The upload layer (`code/sharepoint.py`) retries up to three times with exponential backoff before giving up, so transient network blips between Render and Microsoft's endpoints recover automatically. All failures are written to stderr and appear in Render's log dashboard.
+
+### Required environment variables
+
+Set these as environment variables in the Render dashboard (or in `code/.env` for local development):
+
+| Variable | Description |
+|---|---|
+| `TENANT_ID` | Azure AD tenant ID |
+| `CLIENT_ID` | App registration client ID |
+| `CLIENT_SECRET` | App registration client secret |
+| `SP_HOSTNAME` | SharePoint hostname (e.g. `yourorg.sharepoint.com`) |
+| `SP_SITE_PATH` | Site-relative path (e.g. `/sites/MySite`) |
+| `SP_LIBRARY_NAME` | Document library name (e.g. `InterviewData`) |
+| `SP_TARGET_FOLDER` | Target folder within the library (e.g. `incoming`) |
+
+The app registration must have the `Sites.Selected` application permission with write access granted to the specific site.
+
+### Startup health check
+
+On the first page load of each session the app verifies SharePoint connectivity (token acquisition + drive resolution) before any interview data is collected. If the check fails, a prominent red banner is shown to the participant and administrator with the error detail. The banner persists for the entire session and reappears on every page interaction, so a misconfigured or broken connection cannot go unnoticed.
+
+If SharePoint is unavailable, the interview continues and data is saved locally, but the banner remains visible and all errors are logged to Render.
+
 ## Paper and citation
 
 The paper is available at https://ssrn.com/abstract=4974382 and can be cited with the following bibtex entry:
