@@ -1,5 +1,6 @@
 import logging
 import sys
+from pathlib import Path
 import streamlit as st
 import hmac
 import time
@@ -141,11 +142,15 @@ def save_interview_data(
     with open(os.path.join(times_directory, times_filename), "w") as d:
         d.write(times_content)
 
-    # Upload to SharePoint (non-fatal: log + flag but do not interrupt the interview)
+    # Upload to SharePoint (non-fatal: log + flag but do not interrupt the interview).
+    # Subfolder is derived from the last component of the local directory path so
+    # the SharePoint layout mirrors data/transcripts, data/times, data/backups.
     if _sp._sp_configured():
+        transcript_subfolder = Path(transcripts_directory).name
+        times_subfolder = Path(times_directory).name
         try:
-            _sp.upload_text(transcript_filename, transcript_content)
-            _sp.upload_text(times_filename, times_content)
+            _sp.upload_text(transcript_filename, transcript_content, subfolder=transcript_subfolder)
+            _sp.upload_text(times_filename, times_content, subfolder=times_subfolder)
         except Exception as sp_err:
             logger.error(
                 "SharePoint upload FAILED for user '%s' (data saved locally): %s",

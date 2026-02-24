@@ -131,8 +131,13 @@ def verify_connectivity() -> None:
     logger.info("SharePoint connectivity verified OK.")
 
 
-def upload_bytes(filename: str, content: bytes, _retries: int = 3) -> None:
+def upload_bytes(filename: str, content: bytes, subfolder: str = "", _retries: int = 3) -> None:
     """Upload *content* as *filename* into the configured SharePoint folder.
+
+    If *subfolder* is provided (e.g. "transcripts", "backups") the file is
+    placed at SP_TARGET_FOLDER/subfolder/filename, mirroring the local
+    data/ directory layout. The Graph API creates missing intermediate
+    folders automatically.
 
     Retries up to *_retries* times with exponential backoff (1 s, 2 s, …)
     before re-raising the last exception.
@@ -145,10 +150,8 @@ def upload_bytes(filename: str, content: bytes, _retries: int = 3) -> None:
             drive_id = _get_drive_id(token)
             folder_path = _must_env("SP_TARGET_FOLDER").strip("/")
 
-            upload_url = (
-                f"{GRAPH_ROOT}/drives/{drive_id}"
-                f"/root:/{folder_path}/{filename}:/content"
-            )
+            sp_path = f"{folder_path}/{subfolder}/{filename}" if subfolder else f"{folder_path}/{filename}"
+            upload_url = f"{GRAPH_ROOT}/drives/{drive_id}/root:/{sp_path}:/content"
             r = requests.put(
                 upload_url,
                 headers={
@@ -167,7 +170,7 @@ def upload_bytes(filename: str, content: bytes, _retries: int = 3) -> None:
                     f"Upload of '{filename}' failed ({r.status_code}): {r.text}"
                 )
 
-            logger.info("SharePoint upload OK: %s (attempt %d)", filename, attempt)
+            logger.info("SharePoint upload OK: %s/%s (attempt %d)", subfolder or ".", filename, attempt)
             return
 
         except Exception as exc:
@@ -186,6 +189,6 @@ def upload_bytes(filename: str, content: bytes, _retries: int = 3) -> None:
     raise last_exc
 
 
-def upload_text(filename: str, text: str, encoding: str = "utf-8") -> None:
+def upload_text(filename: str, text: str, subfolder: str = "", encoding: str = "utf-8") -> None:
     """Convenience wrapper: encode *text* and upload as *filename*."""
-    upload_bytes(filename, text.encode(encoding))
+    upload_bytes(filename, text.encode(encoding), subfolder=subfolder)

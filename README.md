@@ -108,24 +108,40 @@ However, Streamlit's component iframes render *after* the page's `load` event fi
 
 ## SharePoint storage (Render deployment)
 
-When hosted on Render, interview data is written to **both** the server's local disk and a SharePoint Online document library via the Microsoft Graph API. Local disk on Render is ephemeral — files are lost on any restart or redeploy — so SharePoint is the durable copy.
+When hosted on Render, interview data is written to **both** the server's local disk and a SharePoint Online document library via the Microsoft Graph API. Local disk on Render is ephemeral — files are lost on any restart or redeploy — so SharePoint is the only durable copy.
 
 ### How it works
 
-Every call to `save_interview_data` (backups during the interview, the final transcript, and the quit path) uploads two files to SharePoint immediately after writing them locally:
+`save_interview_data` is called at multiple points during the interview:
 
-- `{username}.txt` — pseudonymised transcript
-- `{username}.txt` — start time and duration
+| When | What is saved |
+|---|---|
+| Immediately after the first interviewer message | Backup transcript + times → `incoming/backups/` |
+| After **every** subsequent assistant message | Backup transcript + times → `incoming/backups/` |
+| Interview end (closing code or Quit) | Final transcript → `incoming/transcripts/`, times → `incoming/times/` |
 
-Files land in the configured document library folder (e.g. `InterviewData/incoming/`).
+The folder layout in SharePoint mirrors the local `data/` directory:
 
-The upload layer (`code/sharepoint.py`) retries up to three times with exponential backoff before giving up, so transient network blips between Render and Microsoft's endpoints recover automatically. All failures are written to stderr and appear in Render's log dashboard.
+```
+InterviewData/
+└── incoming/
+    ├── transcripts/   ← final transcripts only
+    ├── times/         ← final time files only
+    └── backups/       ← incremental backups after every message
+```
 
-### Required environment variables
+The upload layer (`code/sharepoint.py`) retries up to three times with exponential backoff before giving up, so transient network blips recover automatically. All failures are written to stderr and appear in Render's log dashboard.
 
-Set these as environment variables in the Render dashboard (or in `code/.env` for local development):
+### Setting environment variables on Render
 
-| Variable | Description |
+> **This is the most common reason SharePoint works locally but not on Render.**
+> The `code/.env` file is listed in `.gitignore` and is never deployed. You must add each variable individually in the Render dashboard.
+
+1. Open your service on [render.com](https://render.com)
+2. Go to **Environment** → **Environment Variables**
+3. Add each of the following:
+
+| Variable | Value (from your `code/.env`) |
 |---|---|
 | `TENANT_ID` | Azure AD tenant ID |
 | `CLIENT_ID` | App registration client ID |
@@ -135,11 +151,22 @@ Set these as environment variables in the Render dashboard (or in `code/.env` fo
 | `SP_LIBRARY_NAME` | Document library name (e.g. `InterviewData`) |
 | `SP_TARGET_FOLDER` | Target folder within the library (e.g. `incoming`) |
 
+You also need the Azure OpenAI variables on Render for the same reason:
+
+| Variable | Description |
+|---|---|
+| `CJBS_API_KEY` | Azure OpenAI API key |
+| `CJBS_API_ENDPOINT` | Azure OpenAI endpoint URL |
+| `CJBS_API_VERSION` | API version (e.g. `2024-10-21`) |
+| `CJBS_DEPLOYMENT_NAME` | Deployment name (e.g. `gpt-4.1-nano`) |
+
+4. Click **Save** — Render redeploys automatically.
+
 The app registration must have the `Sites.Selected` application permission with write access granted to the specific site.
 
 ### Startup health check
 
-On the first page load of each session the app verifies SharePoint connectivity (token acquisition + drive resolution) before any interview data is collected. If the check fails, a prominent red banner is shown to the participant and administrator with the error detail. The banner persists for the entire session and reappears on every page interaction, so a misconfigured or broken connection cannot go unnoticed.
+On the first page load of each session the app verifies SharePoint connectivity (token acquisition + drive resolution) before any interview data is collected. If the check fails, a prominent red banner is shown with the error detail. The banner persists for the entire session, so a misconfigured or broken connection cannot go unnoticed.
 
 If SharePoint is unavailable, the interview continues and data is saved locally, but the banner remains visible and all errors are logged to Render.
 
