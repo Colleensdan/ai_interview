@@ -22,6 +22,17 @@ The interview platform is built using the library `streamlit` and the APIs of Op
 - Activate the environment with `conda activate interviews`
 - Start the platform with `streamlit run interview.py`
 
+## Variant URLs (nondescript tokens)
+
+The app selects interview variants using a nondescript query token instead of a descriptive name.
+
+Mapping (edit in `code/config.py`):
+
+```
+combustion     -> /?q=T5wp7
+deforestation  -> /?q=D9k2m
+```
+
 ## Security hardening
 
 Recent updates add guardrails so the model stays aligned with the study protocol:
