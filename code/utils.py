@@ -1,3 +1,5 @@
+import logging
+import sys
 import streamlit as st
 import hmac
 import time
@@ -9,7 +11,18 @@ from pseudonymizer import (
     InterviewPseudonymizer,
     pseudonymize_messages,
 )
+import sharepoint as _sp
+
 PSEUDONYMIZER = InterviewPseudonymizer()
+
+logger = logging.getLogger("ai_interview.utils")
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
 
 
 PROMPT_INJECTION_PATTERNS = [
@@ -106,25 +119,45 @@ def save_interview_data(
         PSEUDONYMIZER, st.session_state.messages
     )
 
-    # Store chat transcript
-    with open(
-        os.path.join(
-            transcripts_directory, f"{username}{file_name_addition_transcript}.txt"
-        ),
-        "w",
-    ) as t:
-        for message in pseudonymized_messages:
-            t.write(f"{message['role']}: {message['content']}\n")
+    # Build file content in memory so it can be saved locally and uploaded to SharePoint
+    transcript_filename = f"{username}{file_name_addition_transcript}.txt"
+    transcript_content = "".join(
+        f"{message['role']}: {message['content']}\n"
+        for message in pseudonymized_messages
+    )
 
-    # Store file with start time and duration of interview
-    with open(
-        os.path.join(times_directory, f"{username}{file_name_addition_time}.txt"),
-        "w",
-    ) as d:
-        duration = (time.time() - st.session_state.start_time) / 60
-        d.write(
-            f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(st.session_state.start_time))}\nInterview duration (minutes): {duration:.2f}"
-        )
+    duration = (time.time() - st.session_state.start_time) / 60
+    times_filename = f"{username}{file_name_addition_time}.txt"
+    times_content = (
+        f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(st.session_state.start_time))}\n"
+        f"Interview duration (minutes): {duration:.2f}"
+    )
+
+    # Store chat transcript locally
+    with open(os.path.join(transcripts_directory, transcript_filename), "w") as t:
+        t.write(transcript_content)
+
+    # Store file with start time and duration of interview locally
+    with open(os.path.join(times_directory, times_filename), "w") as d:
+        d.write(times_content)
+
+    # Upload to SharePoint (non-fatal: log + flag but do not interrupt the interview)
+    if _sp._sp_configured():
+        try:
+            _sp.upload_text(transcript_filename, transcript_content)
+            _sp.upload_text(times_filename, times_content)
+        except Exception as sp_err:
+            logger.error(
+                "SharePoint upload FAILED for user '%s' (data saved locally): %s",
+                username, sp_err,
+            )
+            # Persist the failure flag so the UI banner stays visible across reruns.
+            st.session_state["sp_upload_failed"] = True
+            st.session_state["sp_error"] = str(sp_err)
+            st.warning(
+                f"SharePoint upload failed — interview data is saved locally on "
+                f"the server only. Please notify the administrator. Error: {sp_err}"
+            )
 
     if mapping_handler:
         mapping_handler(mappings)

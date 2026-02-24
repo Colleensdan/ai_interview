@@ -1,8 +1,9 @@
 import argparse
 import json
+import logging
+import sys
 import streamlit as st
 import streamlit.components.v1 as components
-import sys
 import time
 from utils import (
     check_password,
@@ -15,6 +16,7 @@ from pathlib import Path
 import tomllib
 from openai import AzureOpenAI, APIError
 from dotenv import load_dotenv
+import sharepoint as _sp
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
@@ -382,6 +384,32 @@ if "start_time" not in st.session_state:
         "%Y_%m_%d_%H_%M_%S", time.localtime(st.session_state.start_time)
     )
 
+# ---------------------------------------------------------------------------
+# SharePoint connectivity check (runs once per browser session)
+# ---------------------------------------------------------------------------
+if "sp_checked" not in st.session_state:
+    st.session_state.sp_checked = True
+    if _sp._sp_configured():
+        try:
+            _sp.verify_connectivity()
+            st.session_state["sp_ok"] = True
+        except Exception as _sp_err:
+            logging.getLogger("ai_interview").error(
+                "SharePoint connectivity check FAILED at startup: %s", _sp_err
+            )
+            st.session_state["sp_ok"] = False
+            st.session_state["sp_error"] = str(_sp_err)
+
+# Persistent error banner — shown on every rerun if SP is known to be broken
+if st.session_state.get("sp_ok") is False or st.session_state.get("sp_upload_failed"):
+    st.error(
+        "**SharePoint storage is not working.** "
+        "Interview data is being saved to the server's local disk only and will be "
+        "**lost if the server restarts**. "
+        f"Error: {st.session_state.get('sp_error', 'upload failure — see Render logs')}. "
+        "Please contact the administrator before continuing."
+    )
+
 # Check if interview previously completed
 interview_previously_completed = check_if_interview_completed(
     config.TIMES_DIRECTORY, st.session_state.username
@@ -593,9 +621,11 @@ if st.session_state.interview_active:
                             mapping_handler=MAPPING_HANDLER,
                         )
 
-                    except:
-
-                        pass
+                    except Exception as _backup_err:
+                        logging.getLogger("ai_interview").error(
+                            "Backup save failed for user '%s': %s",
+                            st.session_state.username, _backup_err,
+                        )
 
             # If code in the message, display the associated closing message instead
             # Loop over all codes
