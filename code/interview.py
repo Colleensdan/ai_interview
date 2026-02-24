@@ -494,6 +494,7 @@ with col2:
             config.TRANSCRIPTS_DIRECTORY,
             config.TIMES_DIRECTORY,
             mapping_handler=MAPPING_HANDLER,
+            variant=cfg.variant,
         )
 
 
@@ -565,6 +566,7 @@ if not st.session_state.messages:
         file_name_addition_transcript=f"_transcript_started_{st.session_state.start_time_file_names}",
         file_name_addition_time=f"_time_started_{st.session_state.start_time_file_names}",
         mapping_handler=MAPPING_HANDLER,
+        variant=cfg.variant,
     )
 
 
@@ -672,6 +674,7 @@ if st.session_state.interview_active:
                             file_name_addition_transcript=f"_transcript_started_{st.session_state.start_time_file_names}",
                             file_name_addition_time=f"_time_started_{st.session_state.start_time_file_names}",
                             mapping_handler=MAPPING_HANDLER,
+                            variant=cfg.variant,
                         )
 
                     except Exception as _backup_err:
@@ -707,6 +710,7 @@ if st.session_state.interview_active:
                             transcripts_directory=config.TRANSCRIPTS_DIRECTORY,
                             times_directory=config.TIMES_DIRECTORY,
                             mapping_handler=MAPPING_HANDLER,
+                            variant=cfg.variant,
                         )
 
                         final_transcript_stored = check_if_interview_completed(

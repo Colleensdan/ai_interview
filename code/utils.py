@@ -108,12 +108,17 @@ def save_interview_data(
     file_name_addition_transcript="",
     file_name_addition_time="",
     mapping_handler: Optional[Callable[[List[EntityMapping]], None]] = None,
+    variant: str = "",
 ):
     """Write interview data to disk after applying privacy-preserving sanitisation.
 
     The optional `mapping_handler` allows controlled storage of the pseudonymisation
     table outside of the persisted transcript. When provided it receives a list of
     `EntityMapping` objects in the order they were first observed.
+
+    If `variant` is provided (e.g. "combustion", "deforestation") files are
+    uploaded to SharePoint under incoming/{variant}/{subfolder}/ so data from
+    different interview variants is kept separate.
     """
 
     pseudonymized_messages, mappings = pseudonymize_messages(
@@ -143,11 +148,12 @@ def save_interview_data(
         d.write(times_content)
 
     # Upload to SharePoint (non-fatal: log + flag but do not interrupt the interview).
-    # Subfolder is derived from the last component of the local directory path so
-    # the SharePoint layout mirrors data/transcripts, data/times, data/backups.
+    # Path: incoming/{variant}/{data-type}/ mirroring the local data/ layout.
     if _sp._sp_configured():
-        transcript_subfolder = Path(transcripts_directory).name
-        times_subfolder = Path(times_directory).name
+        _type_t = Path(transcripts_directory).name   # e.g. "transcripts" or "backups"
+        _type_d = Path(times_directory).name         # e.g. "times" or "backups"
+        transcript_subfolder = f"{variant}/{_type_t}" if variant else _type_t
+        times_subfolder = f"{variant}/{_type_d}" if variant else _type_d
         try:
             _sp.upload_text(transcript_filename, transcript_content, subfolder=transcript_subfolder)
             _sp.upload_text(times_filename, times_content, subfolder=times_subfolder)
