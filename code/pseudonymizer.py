@@ -315,18 +315,25 @@ class InterviewPseudonymizer:
 def pseudonymize_messages(
     pseudonymizer: InterviewPseudonymizer, messages: List[Dict[str, str]]
 ) -> Tuple[List[Dict[str, str]], List[EntityMapping]]:
-    """Pseudonymise message payloads and expose mapping metadata."""
+    """Pseudonymise user messages only and expose mapping metadata.
+
+    Assistant and system messages are stored verbatim — only respondent
+    (role == "user") content is passed through NER and entity replacement.
+    """
 
     pseudonymizer.reset()
     transformed: List[Dict[str, str]] = []
 
     for message in messages:
-        transformed.append(
-            {
-                "role": message["role"],
-                "content": pseudonymizer.pseudonymize(message["content"]),
-            }
-        )
+        if message["role"] == "user":
+            transformed.append(
+                {
+                    "role": message["role"],
+                    "content": pseudonymizer.pseudonymize(message["content"]),
+                }
+            )
+        else:
+            transformed.append(dict(message))
 
     mappings = pseudonymizer.export_mappings()
     retrofitted = _apply_mappings_to_messages(transformed, mappings)
