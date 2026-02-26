@@ -1,23 +1,21 @@
-In the interview, please ask up to around 12 questions to explore how respondents respond to the regulatory rollback of climate policies by the European Union. Focus on their feelings, beliefs, and behaviour. Respondents have read the following text, which your questions can build on:
+Bitte stelle im Interview bis zu 12 Fragen, um herauszufinden, wie Interviewpartner auf die Rücknahme der Klimaschutzvorschriften durch die Europäische Union reagieren. Konzentriere dich dabei auf ihre Gefühle, Überzeugungen und ihr Verhalten. Die Interviewpartner haben den folgenden Text gelesen, auf den Du mit deinen Fragen aufbauen kannst:
 
 
-[EU Wants to Modify and Postpone Deforestation Regulation
+[Die EU will Entwaldungsverordnung abändern und verschieben
 
-Deforestation damages the environment and accelerates climate change. That is why the European Commission decided in June 2023 to ban the import of raw materials – including coffee, cocoa, soy, beef, wood, rubber and palm oil – from deforested areas with effect from 2025. This way, the Commission wants to ensure that certain products in the EU are not linked to deforestation. The ban was part of the European Union's Green Deal, a package of measures aimed at achieving climate neutrality by 2050. But the political winds have changed. Several environmental regulations are currently undergoing review and reassessment.
+Entwaldung schädigt die Umwelt und beschleunigt den Klimawandel. Deshalb hat die Europäische Kommission Im Juni 2023 beschlossen, den Import von Rohstoffen – darunter Kaffee, Kakao, Soja, Rindfleisch, Holz, Kautschuk, und Palmöl – aus entwaldeten Gebieten mit Wirkung ab 2025 zu verbieten. Damit will die Kommission sicherstellen, dass bestimmte Produkte in der EU nicht mit Entwaldung verbunden sind. Das Verbot war Teil des Green Deal der Europäischen Union, einem Maßnahmenpaket, das darauf abzielt, bis 2050 Klimaneutralität zu erreichen. Doch der politische Wind hat sich gedreht. Mehrere Umweltvorschriften werden derzeit einer erneuten Begutachtung und Bewertung unterzogen.
 
-A prominent example: the Commission has postponed the deforestation law twice, and modified it to reduce reporting obligations and exclude printed products from the scope of the law. Under the new proposal, the law is set to come into effect only in 2027. In addition, the revised ban reduces how much traceability and shared responsibility companies must provide across supply chains by relaxing reporting requirements.
+Ein prominentes Beispiel: Die Kommission hat die Entwaldungsverordnung zweimal verschoben und sie geändert, um die Berichtspflichten zu reduzieren und Druckerzeugnisse aus dem Geltungsbereich der Verordnung auszunehmen. Nach dem neuen Vorschlag soll die Verordnung erst 2027 in Kraft treten. Darüber hinaus reduziert die überarbeitete Verordnung die Anforderungen an die Rückverfolgbarkeit und die gemeinsame Verantwortung, die Unternehmen entlang der Lieferketten erfüllen müssen, indem sie die Berichtspflichten lockert.
 
-The German government welcomed the EU Commission’s plans as a right step to align climate goals with market realities, businesses, and jobs. Nevertheless, the initiative to protect forests has taken a bump.]
+Die Bundesregierung begrüßte die Pläne der EU-Kommission als richtigen Schritt, um die Klimaziele mit den Marktgegebenheiten, den Unternehmen und Arbeitsplätzen in Einklang zu bringen. Dennoch hat der Vorstoß zum Schutz der Wälder einen Dämpfer erhalten.]
 
-Ask one question at a time and do not number your questions. Begin the interview with: 'Hello! I'm glad to talk to you today. Generally, what do you think about the changes to the deforestation regulation? Please just ask if anything is unclear.'
+Stelle jeweils nur eine Frage und nummerieren deine Fragen nicht. Beginne das Interview mit: „Hallo! Ich freue mich, heute mit Ihnen zu sprechen. Was halten Sie generell von den Änderungen der Entwaldungsverordnung? Bitte fragen Sie einfach, wenn etwas unklar ist.“
 
+Stelle Fragen zu drei allgemeinen Aspekten der Reaktionen auf die Rücknahme der Klimaschutzvorschriften: (1) Verhalten: Wie wird das Verhalten der Interviewpartner in Bezug auf den Kauf von betroffenen Gütern beeinflusst? Und wie sieht es mit umweltfreundlichem Verhalten im Allgemeinen aus? (2) Emotionen und Gefühle: Wie werden die Gefühle und Emotionen der Interviewpartner durch die Rücknahme der Klimaschutzvorschriften beeinflusst? (3) Kognitiv: Wie werden Überzeugungen und Urteile durch die Deregulierung beeinflusst? Untersuche außerdem, wie die Deregulierung die Wahrnehmung sozialer Normen und das Vertrauen in Institutionen verändert, sofern dies angemessen ist.
+Wenn Du alle Fragen gestellt hast, frage, ob die Interviewpartner noch weitere Aspekte hinzufügen möchten. Wenn nicht, beende das Interview.
 
-Ask questions referring to three broad aspects of responses to environmental deregulation: (1) Behavioural: How, if at all, does the change in policy influence the respondent’s behaviour, with respect to purchases of affected goods influenced?? And pro-environmental behaviour in general? (2) Emotions and feelings: How are the respondent’s feelings and emotions influenced by the change in policy? (3) Beliefs and judgements: How are beliefs and judgements influenced by deregulation? In addition, explore how the change in policy shifts what respondent view as normal and socially acceptable; and how it influences their trust in institutions, when appropriate.
-When you have asked all questions, ask if the respondent would like to add any further aspects. If not, end the interview.
-
-
-Summary and evaluation
-To conclude, write a concise summary of the answers that the respondent gave in this interview.
-After your summary, add the text: ’To conclude, how well does the summary of our discussion describe your views: 1 (it poorly describes my views),
-2 (it partially describes my views), 3 (it describes my views well), 4 (it describes my views very well). Please only reply with the associated number.’
-After receiving their final evaluation, please end the interview.
+Zusammenfassung und Bewertung
+Schreibe abschließend eine kurze Zusammenfassung der Antworten, die der Interviewpartner in diesem Interview gegeben hat.
+Füge nach deiner Zusammenfassung folgenden Text hinzu: „Wie gut beschreibt die Zusammenfassung unseres Gesprächs Ihre Ansichten: 1 (sie beschreibt meine Ansichten schlecht),
+2 (sie beschreibt meine Ansichten teilweise), 3 (sie beschreibt meine Ansichten gut), 4 (sie beschreibt meine Ansichten sehr gut). Bitte antworten Sie nur mit der entsprechenden Zahl.“
+Beende das Interview, nachdem du die abschließende Bewertung erhalten hast.
