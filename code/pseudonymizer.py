@@ -66,6 +66,17 @@ FACILITY_TYPE_KEYWORDS = {
 DATE_YEAR_PATTERN = re.compile(r"\b(1[89]\d{2}|20\d{2}|21\d{2})\b")
 
 
+# Named calendar terms that make a DATE entity specific enough to pseudonymise.
+SPECIFIC_DATE_WORDS: frozenset = frozenset({
+    "january", "february", "march", "april", "june", "july",
+    "august", "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
+    "oct", "nov", "dec",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+})
+
+
 WORD_START_PATTERN = re.compile(r"\b[a-z][a-z'\-]*")
 
 
@@ -132,7 +143,9 @@ class InterviewPseudonymizer:
             return text
 
         doc = self._nlp(text)
-        entities = list(doc.ents)
+        # Filter base NER entities to remove likely false positives before
+        # extending with high-precision supplemental detections.
+        entities = [e for e in doc.ents if not self._is_likely_false_positive(e)]
         replacements: List[Tuple[int, int, str]] = []
 
         if entities:
@@ -140,7 +153,7 @@ class InterviewPseudonymizer:
         else:
             occupied = set()
 
-        entities.extend(self._case_normalised_entities(doc, text, occupied))
+        # entities.extend(self._case_normalised_entities(doc, text, occupied))
         entities.extend(self._supplement_person_entities(doc, occupied))
         entities.extend(self._supplement_email_entities(doc, occupied))
         entities = [self._normalise_email_entity(doc, ent) for ent in entities]
@@ -238,6 +251,58 @@ class InterviewPseudonymizer:
             extra_spans.append(span)
 
         return extra_spans
+
+    def _is_likely_false_positive(self, ent: Span) -> bool:
+        """Return True if a base NER entity looks like a misclassification.
+
+        Applied only to entities from doc.ents (base model output).  Supplemental
+        detections from pattern matching are high-precision and bypass this gate.
+        """
+        label = ent.label_
+
+        if label in ("PERSON", "ORG", "NORP", "GPE", "LOC"):
+            # If every token is lowercase and not an all-caps acronym the span is
+            # almost certainly a common word the model has misclassified.
+            if not self._has_meaningful_capitalisation(ent):
+                return True
+            # A single-token entity immediately preceded by an article is a
+            # generic noun ("the company", "a state"), not a proper noun.
+            if len(ent) == 1 and self._preceded_by_article(ent):
+                return True
+
+        if label == "DATE":
+            # Only replace dates with concrete calendar references; vague phrases
+            # ("at the time", "a while", "soon") should pass through unchanged.
+            if not self._date_is_specific(ent):
+                return True
+
+        return False
+
+    def _has_meaningful_capitalisation(self, ent: Span) -> bool:
+        """Return True if at least one token is capitalised beyond sentence position."""
+        for token in ent:
+            if len(token.text) < 2:
+                continue
+            # All-caps acronym (e.g. "WHO", "NHS", "NASA").
+            if token.text.isupper():
+                return True
+            # Mixed / title case that is not just sentence-initial capitalisation.
+            if token.text != token.text.lower() and not token.is_sent_start:
+                return True
+        return False
+
+    def _preceded_by_article(self, ent: Span) -> bool:
+        """Return True if the entity is immediately preceded by a, an, or the."""
+        if ent.start == 0:
+            return False
+        return ent.doc[ent.start - 1].lower_ in {"a", "an", "the"}
+
+    def _date_is_specific(self, ent: Span) -> bool:
+        """Return True only if the date entity contains a year or a named calendar term."""
+        if DATE_YEAR_PATTERN.search(ent.text):
+            return True
+        words = {w.lower() for w in re.findall(r"\b[a-z]+\b", ent.text.lower())}
+        return bool(words & SPECIFIC_DATE_WORDS)
 
     def _placeholder_for_entity(self, ent: Span) -> Optional[str]:
         label = ent.label_
