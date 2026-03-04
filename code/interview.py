@@ -296,33 +296,44 @@ def _prepare_api_kwargs():
 
 
 def _disable_paste_on_chat_input():
-    """Prevent pasting into the Streamlit chat input textarea."""
+    """Prevent pasting into the Streamlit chat input textarea.
 
+    The session start time is embedded as a nonce so that Streamlit/React
+    creates a fresh iframe (and re-executes the script) whenever a new session
+    begins — e.g. after a server restart or reconnect — while still reusing the
+    cached iframe across reruns within the same session.  This prevents a stale
+    MutationObserver from a previous session leaving the textarea unprotected.
+    """
+
+    nonce = st.session_state.get("start_time", 0)
     components.html(
-        """
+        f"""
         <script>
-        (function() {
+        (function() {{
           const parentWindow = window.parent;
-          if (parentWindow.__disableChatPasteObserver) {
-            return;
-          }
-          const attachListener = () => {
+          // Disconnect any stale observer from a previous session before
+          // re-establishing, so a reconnect never leaves the textarea unprotected.
+          if (parentWindow.__disableChatPasteObserver) {{
+            parentWindow.__disableChatPasteObserver.disconnect();
+            delete parentWindow.__disableChatPasteObserver;
+          }}
+          const attachListener = () => {{
             const textarea = parentWindow.document.querySelector(
               'textarea[data-testid="stChatInputTextArea"]'
             );
-            if (!textarea || textarea.dataset.pasteDisabled === "true") {
+            if (!textarea || textarea.dataset.pasteDisabled === "true") {{
               return;
-            }
+            }}
             textarea.dataset.pasteDisabled = "true";
-            textarea.addEventListener("paste", (event) => {
+            textarea.addEventListener("paste", (event) => {{
               event.preventDefault();
-            });
-          };
+            }});
+          }};
           attachListener();
           const observer = new MutationObserver(attachListener);
-          observer.observe(parentWindow.document.body, { childList: true, subtree: true });
+          observer.observe(parentWindow.document.body, {{ childList: true, subtree: true }});
           parentWindow.__disableChatPasteObserver = observer;
-        })();
+        }})();
         </script>
         """,
         height=0,
