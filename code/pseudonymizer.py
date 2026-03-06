@@ -8,7 +8,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import spacy
 from spacy.language import Language
-from spacy.lang.en.stop_words import STOP_WORDS
+from spacy.lang.de.stop_words import STOP_WORDS
 from spacy.tokens import Doc, Span
 
 
@@ -67,13 +67,22 @@ DATE_YEAR_PATTERN = re.compile(r"\b(1[89]\d{2}|20\d{2}|21\d{2})\b")
 
 
 # Named calendar terms that make a DATE entity specific enough to pseudonymise.
+# Includes both English and German terms so the filter works with de_core_news_*.
 SPECIFIC_DATE_WORDS: frozenset = frozenset({
+    # English months
     "january", "february", "march", "april", "june", "july",
     "august", "september", "october", "november", "december",
     "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
     "oct", "nov", "dec",
+    # English weekdays
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
     "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+    # German months
+    "januar", "februar", "märz", "mai", "juni", "juli",
+    "oktober",
+    # German weekdays
+    "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag",
+    "mo", "di", "mi", "do", "fr", "sa", "so",
 })
 
 
@@ -89,7 +98,10 @@ EMAIL_PATTERN = re.compile(
 
 
 NAME_FALLBACK_PATTERN = re.compile(
-    r"\b(?:my\s+name\s+is|name\s*[:=])\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,3})",
+    r"\b(?:my\s+name\s+is|name\s*[:=]"
+    r"|mein\s+name\s+ist|ich\s+hei[sß]e|ich\s+bin)\s+"
+    r"(?P<name>[A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F'\-]*"
+    r"(?:\s+[A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F'\-]*){0,3})",
     re.IGNORECASE,
 )
 
@@ -104,13 +116,13 @@ class EntityMapping:
 
 
 def _load_spacy_model(preferred_names: Sequence[str] | None = None) -> Language:
-    """Return a spaCy English model, raising a clear error if none are installed."""
+    """Return a spaCy German model, raising a clear error if none are installed."""
 
     names: Iterable[str]
     if preferred_names:
         names = preferred_names
     else:
-        names = ("en_core_web_sm", "en_core_web_md", "en_core_web_lg")
+        names = ("de_core_news_sm", "de_core_news_md", "de_core_news_lg")
 
     for name in names:
         try:
@@ -119,7 +131,7 @@ def _load_spacy_model(preferred_names: Sequence[str] | None = None) -> Language:
             continue
 
     raise RuntimeError(
-        "No spaCy English model is installed. Run 'python -m spacy download en_core_web_sm' "
+        "No spaCy German model is installed. Run 'python -m spacy download de_core_news_sm' "
         "to enable interview text pseudonymisation."
     )
 
