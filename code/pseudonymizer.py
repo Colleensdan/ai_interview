@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import re
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
-
-import spacy
-from spacy.language import Language
-from spacy.lang.de.stop_words import STOP_WORDS
-from spacy.tokens import Doc, Span
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 
 # Mapping derived from spaCy entity labels to placeholders requested by governance.
@@ -89,9 +85,6 @@ SPECIFIC_DATE_WORDS: frozenset = frozenset({
 WORD_START_PATTERN = re.compile(r"\b[a-z][a-z'\-]*")
 
 
-STOPWORDS = {word.lower() for word in STOP_WORDS}
-
-
 EMAIL_PATTERN = re.compile(
     r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
 )
@@ -106,6 +99,119 @@ NAME_FALLBACK_PATTERN = re.compile(
 )
 
 
+_DEFAULT_PHRASES_DIR = Path(__file__).parent / "psudoanonymised-phrases"
+
+# Splits a template line into alternating literal-text / placeholder tokens.
+# e.g. "My name is <name>" → ["My name is ", "<name>", ""]
+_TEMPLATE_SPLIT_RE = re.compile(r"(<[^>]+>)")
+
+# Trailing capture group: up to 5 whitespace-separated tokens, no sentence
+# punctuation, so "My name is Alice Smith" captures "Alice Smith" not the rest.
+_TRAILING_CAPTURE = r"([^\s,\.!?;\n]+(?:\s+[^\s,\.!?;\n]+){0,4})"
+
+# Inner capture group (placeholder has something after it in the template):
+# lazy so it stops as soon as the next literal fragment can match.
+_INNER_CAPTURE = r"(.+?)"
+
+
+def _parse_template(
+    line: str,
+) -> "Optional[Tuple[re.Pattern[str], List[str], List[str]]]":
+    """Convert a template line into a compiled regex plus part lists.
+
+    Returns ``(pattern, text_parts, placeholders)`` or ``None`` if the line
+    contains no placeholder tokens.
+
+    *text_parts* are the literal fragments between placeholders (len = len(placeholders)+1).
+    *placeholders* are the ``<...>`` tokens in order.
+    """
+    parts = _TEMPLATE_SPLIT_RE.split(line)
+    text_parts: List[str] = parts[0::2]   # indices 0, 2, 4, …
+    ph_parts: List[str] = parts[1::2]     # indices 1, 3, 5, …
+
+    if not ph_parts:
+        return None
+
+    pattern_str = ""
+    for i, text in enumerate(text_parts):
+        pattern_str += re.escape(text)
+        if i < len(ph_parts):
+            is_last = i == len(ph_parts) - 1
+            pattern_str += _TRAILING_CAPTURE if is_last else _INNER_CAPTURE
+
+    try:
+        return re.compile(pattern_str, re.IGNORECASE), text_parts, ph_parts
+    except re.error:
+        return None
+
+
+class PhrasePseudonymizer:
+    """Redact PII using trigger-phrase templates loaded from a directory.
+
+    This is the default pseudonymisation strategy.  It requires no external NLP
+    models.  Each ``.txt`` file in *phrases_dir* should contain one template per
+    line, e.g.::
+
+        My name is <name>
+        I work at <organisation>
+
+    When a template matches in user input the captured value is replaced by the
+    placeholder token (``<name>``, ``<organisation>``, etc.).  Matching is
+    case-insensitive.  Blank lines and lines starting with ``#`` are ignored.
+    """
+
+    def __init__(self, phrases_dir: Optional[Path] = None) -> None:
+        self._phrases_dir = phrases_dir or _DEFAULT_PHRASES_DIR
+        self._rules: "List[Tuple[re.Pattern[str], List[str], List[str]]]" = []
+        self._load()
+        self._observed: "List[EntityMapping]" = []
+
+    def _load(self) -> None:
+        """Load all template rules from every ``.txt`` file in the phrases directory."""
+        self._rules = []
+        if not self._phrases_dir.is_dir():
+            return
+        for txt_file in sorted(self._phrases_dir.glob("*.txt")):
+            for raw in txt_file.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                result = _parse_template(line)
+                if result:
+                    self._rules.append(result)
+
+    def reset(self) -> None:
+        """Clear per-session observations so each interview starts clean."""
+        self._observed = []
+
+    def pseudonymize(self, text: str) -> str:
+        """Return *text* with template-matched values replaced by their placeholders."""
+        if not text or not self._rules:
+            return text
+        for pattern, text_parts, ph_parts in self._rules:
+            text = pattern.sub(self._make_repl(text_parts, ph_parts), text)
+        return text
+
+    def _make_repl(
+        self, text_parts: "List[str]", ph_parts: "List[str]"
+    ) -> "Callable[[re.Match], str]":
+        """Return a replacement function that records observations and rebuilds the text."""
+        observed = self._observed
+
+        def _repl(m: re.Match) -> str:
+            result = text_parts[0]
+            for i, ph in enumerate(ph_parts):
+                captured = m.group(i + 1)
+                observed.append(EntityMapping(captured.strip(), ph, "PHRASE"))
+                result += ph + text_parts[i + 1]
+            return result
+
+        return _repl
+
+    def export_mappings(self) -> "List[EntityMapping]":
+        return list(self._observed)
+
+
 @dataclass
 class EntityMapping:
     """Record of how a specific entity was pseudonymised."""
@@ -115,8 +221,11 @@ class EntityMapping:
     label: str
 
 
-def _load_spacy_model(preferred_names: Sequence[str] | None = None) -> Language:
+def _load_spacy_model(preferred_names: Sequence[str] | None = None) -> "Language":
     """Return a spaCy German model, raising a clear error if none are installed."""
+
+    import spacy  # lazy — only needed when InterviewPseudonymizer is used
+    from spacy.language import Language  # noqa: F401 (used for return annotation only)
 
     names: Iterable[str]
     if preferred_names:
@@ -134,6 +243,12 @@ def _load_spacy_model(preferred_names: Sequence[str] | None = None) -> Language:
         "No spaCy German model is installed. Run 'python -m spacy download de_core_news_sm' "
         "to enable interview text pseudonymisation."
     )
+
+
+def _get_spacy_stopwords() -> Set[str]:
+    """Return German stop-words from spaCy (lazy import)."""
+    from spacy.lang.de.stop_words import STOP_WORDS  # type: ignore[import]
+    return {word.lower() for word in STOP_WORDS}
 
 
 class InterviewPseudonymizer:
@@ -191,8 +306,8 @@ class InterviewPseudonymizer:
         return list(self._entity_memory.values())
 
     def _supplement_person_entities(
-        self, doc: Doc, seen_ranges: Set[Tuple[int, int]]
-    ) -> List[Span]:
+        self, doc: "Doc", seen_ranges: Set[Tuple[int, int]]
+    ) -> List["Span"]:
         """Return PERSON spans derived from explicit self-disclosure patterns."""
 
         extra_spans: List[Span] = []
@@ -218,8 +333,8 @@ class InterviewPseudonymizer:
         return extra_spans
 
     def _supplement_email_entities(
-        self, doc: Doc, seen_ranges: Set[Tuple[int, int]]
-    ) -> List[Span]:
+        self, doc: "Doc", seen_ranges: Set[Tuple[int, int]]
+    ) -> List["Span"]:
         """Return EMAIL spans detected via pattern matching."""
 
         extra_spans: List[Span] = []
@@ -241,8 +356,8 @@ class InterviewPseudonymizer:
         return extra_spans
 
     def _case_normalised_entities(
-        self, doc: Doc, text: str, seen_ranges: Set[Tuple[int, int]]
-    ) -> List[Span]:
+        self, doc: "Doc", text: str, seen_ranges: Set[Tuple[int, int]]
+    ) -> List["Span"]:
         """Augment detections by capitalising word starts before running NER again."""
 
         fallback_text = _capitalise_candidate_words(text)
@@ -264,7 +379,7 @@ class InterviewPseudonymizer:
 
         return extra_spans
 
-    def _is_likely_false_positive(self, ent: Span) -> bool:
+    def _is_likely_false_positive(self, ent: "Span") -> bool:
         """Return True if a base NER entity looks like a misclassification.
 
         Applied only to entities from doc.ents (base model output).  Supplemental
@@ -290,7 +405,7 @@ class InterviewPseudonymizer:
 
         return False
 
-    def _has_meaningful_capitalisation(self, ent: Span) -> bool:
+    def _has_meaningful_capitalisation(self, ent: "Span") -> bool:
         """Return True if at least one token is capitalised beyond sentence position."""
         for token in ent:
             if len(token.text) < 2:
@@ -303,20 +418,20 @@ class InterviewPseudonymizer:
                 return True
         return False
 
-    def _preceded_by_article(self, ent: Span) -> bool:
+    def _preceded_by_article(self, ent: "Span") -> bool:
         """Return True if the entity is immediately preceded by a, an, or the."""
         if ent.start == 0:
             return False
         return ent.doc[ent.start - 1].lower_ in {"a", "an", "the"}
 
-    def _date_is_specific(self, ent: Span) -> bool:
+    def _date_is_specific(self, ent: "Span") -> bool:
         """Return True only if the date entity contains a year or a named calendar term."""
         if DATE_YEAR_PATTERN.search(ent.text):
             return True
         words = {w.lower() for w in re.findall(r"\b[a-z]+\b", ent.text.lower())}
         return bool(words & SPECIFIC_DATE_WORDS)
 
-    def _placeholder_for_entity(self, ent: Span) -> Optional[str]:
+    def _placeholder_for_entity(self, ent: "Span") -> Optional[str]:
         label = ent.label_
 
         if label == "EMAIL":
@@ -330,13 +445,13 @@ class InterviewPseudonymizer:
 
         return PLACEHOLDER_BY_LABEL.get(label)
 
-    def _date_placeholder(self, ent: Span) -> str:
+    def _date_placeholder(self, ent: "Span") -> str:
         match = DATE_YEAR_PATTERN.search(ent.text)
         if match:
             return f"<date-{match.group(0)}>"
         return "<date>"
 
-    def _facility_placeholder(self, ent: Span) -> Optional[str]:
+    def _facility_placeholder(self, ent: "Span") -> Optional[str]:
         text = ent.text.strip()
         lowered = text.lower()
         without_article = re.sub(r"^(?:the|a|an)\s+", "", lowered)
@@ -354,10 +469,10 @@ class InterviewPseudonymizer:
                     return placeholder
         return "facility"
 
-    def _normalised_key(self, ent: Span) -> str:
+    def _normalised_key(self, ent: "Span") -> str:
         return f"{ent.label_}:{ent.text.strip().lower()}"
 
-    def _normalise_email_entity(self, doc: Doc, ent: Span) -> Span:
+    def _normalise_email_entity(self, doc: "Doc", ent: "Span") -> "Span":
         text = ent.text.strip()
         if EMAIL_PATTERN.fullmatch(text):
             label_id = self._ensure_email_label(doc)
@@ -365,7 +480,7 @@ class InterviewPseudonymizer:
         return ent
 
     @staticmethod
-    def _ensure_email_label(doc: Doc) -> int:
+    def _ensure_email_label(doc: "Doc") -> int:
         return doc.vocab.strings.add("EMAIL")
 
     @staticmethod
@@ -420,11 +535,13 @@ def pseudonymize_messages(
 def _capitalise_candidate_words(text: str) -> str:
     """Uppercase the first letter of likely proper nouns while preserving spacing."""
 
+    stopwords = _get_spacy_stopwords()
+
     def _replacement(match: re.Match[str]) -> str:
         word = match.group(0)
         if len(word) <= 2:
             return word
-        if word in STOPWORDS:
+        if word in stopwords:
             return word
         return word[0].upper() + word[1:]
 

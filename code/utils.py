@@ -10,11 +10,25 @@ from typing import Callable, List, Optional
 from pseudonymizer import (
     EntityMapping,
     InterviewPseudonymizer,
+    PhrasePseudonymizer,
     pseudonymize_messages,
 )
 import sharepoint as _sp
 
-PSEUDONYMIZER = InterviewPseudonymizer()
+
+def _build_pseudonymizer():
+    """Return the active pseudonymizer.
+
+    Default: phrase-blocklist (``PhrasePseudonymizer``).
+    Pass ``--spacy-pseudonymization`` on the command line to use the
+    spaCy NER-based ``InterviewPseudonymizer`` instead.
+    """
+    if "--spacy-pseudonymization" in sys.argv:
+        return InterviewPseudonymizer()
+    return PhrasePseudonymizer()
+
+
+PSEUDONYMIZER = _build_pseudonymizer()
 
 logger = logging.getLogger("ai_interview.utils")
 if not logger.handlers:

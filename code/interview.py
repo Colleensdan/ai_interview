@@ -83,6 +83,15 @@ def _parse_cli_args():
         action="store_true",
         help="Persist pseudonymisation mappings using the default secure directory.",
     )
+    parser.add_argument(
+        "--spacy-pseudonymization",
+        dest="spacy_pseudonymization",
+        action="store_true",
+        help=(
+            "Use spaCy NER-based pseudonymisation instead of the default "
+            "phrase-blocklist approach. Requires a German spaCy model to be installed."
+        ),
+    )
     args, _ = parser.parse_known_args(_extract_cli_args())
     return args
 

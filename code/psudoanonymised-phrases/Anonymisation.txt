@@ -1,0 +1,51 @@
+My name is <name>
+I am called <name>
+You can call me <name>
+I go by <name>
+I prefer to be called <name>
+My full name is <name>
+My first name is <first name>
+My surname is <surname>
+My family name is <family name>
+My given name is <given name>
+
+I’m <age> years old
+My age is <age>
+I was born in <year/place>
+I was born on <date/place>
+My date of birth is <date of birth>
+
+I’m originally from <place>
+I’m from <country/region>
+I grew up in <place>
+I currently live in <place>
+I currently reside in <place>
+I’m based in <place>
+I’ve just moved to <place>
+I’ve been living in <place> 
+My postcode is <postcode>
+
+I work for <organisation>
+I work at <organisation>
+I’m employed by <organisation>
+My job title is <job title>
+I work as a <job title>
+I’m employed as a <job title>
+I currently work as a <job title>
+
+I study at <university/institution>
+
+My nationality is <nationality>
+I hold <nationality> citizenship
+
+I’m a member of <organisation>
+I’m an active member of <club/society>
+I’m on the board of <organisation>
+
+My phone number is <phone number>
+My mobile number is <mobile number>
+My number is <mobile number>
+My email address is <email address>
+My username is <username>
+My ID is <ID>
+My id is <ID>
