@@ -11,7 +11,9 @@ from utils import (
     check_if_interview_completed,
     save_interview_data,
     detect_prompt_injection_attempt,
+    PSEUDONYMIZER,
 )
+from pseudonymizer import _apply_mappings_to_messages
 import os
 from pathlib import Path
 import tomllib
@@ -616,13 +618,15 @@ if st.session_state.interview_active:
 
         else:
 
+            # Pseudonymize before storing so the assistant never sees raw PII
+            _pseudonymized_user_msg = PSEUDONYMIZER.pseudonymize(message_respondent)
             st.session_state.messages.append(
-                {"role": "user", "content": message_respondent}
+                {"role": "user", "content": _pseudonymized_user_msg}
             )
 
-            # Display respondent message
+            # Display respondent message (pseudonymized so UI matches stored content)
             with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
-                st.markdown(message_respondent)
+                st.markdown(_pseudonymized_user_msg)
 
             # Generate and display interviewer message
             with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
@@ -677,10 +681,16 @@ if st.session_state.interview_active:
                 if not any(
                     code in message_interviewer for code in config.CLOSING_MESSAGES.keys()
                 ):
+                    # Apply any captured PII mappings to the assistant reply before storing
+                    _current_mappings = PSEUDONYMIZER.export_mappings()
+                    _pseudonymized_assistant_msg = _apply_mappings_to_messages(
+                        [{"role": "assistant", "content": message_interviewer}],
+                        _current_mappings,
+                    )[0]["content"]
 
-                    message_placeholder.markdown(message_interviewer)
+                    message_placeholder.markdown(_pseudonymized_assistant_msg)
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": message_interviewer}
+                        {"role": "assistant", "content": _pseudonymized_assistant_msg}
                     )
 
                     # Regularly store interview progress as backup, but prevent script from
@@ -708,9 +718,15 @@ if st.session_state.interview_active:
             for code in config.CLOSING_MESSAGES.keys():
 
                 if code in message_interviewer:
+                    # Pseudonymize closing message before storing
+                    _current_mappings = PSEUDONYMIZER.export_mappings()
+                    _pseudonymized_closing_msg = _apply_mappings_to_messages(
+                        [{"role": "assistant", "content": message_interviewer}],
+                        _current_mappings,
+                    )[0]["content"]
                     # Store message in list of messages
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": message_interviewer}
+                        {"role": "assistant", "content": _pseudonymized_closing_msg}
                     )
 
                     # Set chat to inactive and display closing message
