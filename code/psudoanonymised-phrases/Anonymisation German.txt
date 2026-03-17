@@ -1,57 +1,49 @@
-Mein Name ist <name>
-Ich heiße <name>
-Du kannst mich <name> nennen
-Sie können mich <name> nennen
-Ich werde <name> genannt
-Ich werde lieber <name> genannt
-Mein voller Name ist <name>
-Mein Vorname ist <first name>
-Mein Nachname ist <surname>
-Mein Familienname ist <family name>
-Mein Rufname ist <given name>
+Mein Name ist <Name>
+Ich heiße <Name>
+Du kannst mich <Name> nennen
+Sie können mich <Name> nennen
+Ich werde <Name> genannt
+Ich werde lieber <Name> genannt
+Mein voller Name ist <Name>
+Mein Vorname ist <Name>
+Mein Nachname ist <Name>
+Mein Familienname ist <Name>
+Mein Rufname ist <Name>
 
-Ich bin <age> Jahre alt
-Mein Alter ist <age>
-Ich wurde <year> geboren
-Ich wurde im Jahr <year> geboren
-Ich wurde in <place> geboren
-Ich wurde am <date> in <place> geboren
-Mein Geburtsdatum ist <date of birth>
+Ich bin <Alter> Jahre alt
+Mein Alter ist <Alter>
+Ich wurde <Jahr> geboren
+Ich wurde im Jahr <Jahr> geboren
+Ich wurde in <Ort> geboren
+Ich wurde am <Datum> in <place> geboren
+Mein Geburtsdatum ist <Datum>
 
-Ich komme ursprünglich aus <place>
-Ich komme aus <country/region>
-Ich bin in <place> aufgewachsen
-Ich wohne derzeit in <place>
-Ich lebe derzeit in <place>
-Ich bin in <place> ansässig
-Ich habe meinen Wohnsitz in <place>
-Ich bin gerade nach <place> gezogen
-Ich lebe seit <time period> in <place>
-Meine Postleitzahl ist <postcode>
+Ich komme ursprünglich aus <Ort>
+Ich komme aus <Ort>
+Ich bin in <Ort> aufgewachsen
+Ich wohne derzeit in <Ort>
+Ich wohne in <Ort>
+Ich lebe derzeit in <Ort>
+Ich bin in <Ort> ansässig
+Ich habe meinen Wohnsitz in <Ort>
+Ich bin gerade nach <Ort> gezogen
+Ich lebe seit <Zeit> in <Ort>
+Meine Postleitzahl ist <Nummer>
 
-Ich arbeite für <organisation>
-Ich arbeite bei <organisation>
-Ich bin bei <organisation> angestellt
-Meine Berufsbezeichnung ist <job title>
-Ich arbeite als <job title>
-Ich bin als <job title> angestellt
-Ich arbeite derzeit als <job title>
+Ich arbeite für <Organisation>
+Ich arbeite bei <Organisation>
+Ich bin bei <Organisation> angestellt
 
-Ich studiere an <university/institution>
+Ich studiere an <Universität>
 
-Meine Staatsangehörigkeit ist <nationality>
-Ich habe die <nationality> Staatsbürgerschaft
-Ich besitze die <nationality> Staatsangehörigkeit
+Meine Staatsangehörigkeit ist <Nationalität>
+Ich habe die <Nationalität> Staatsbürgerschaft
+Ich besitze die <Nationalität> Staatsangehörigkeit
 
-Ich bin Mitglied von <organisation>
-Ich bin aktives Mitglied in <club/society>
-Ich bin im Vorstand von <organisation>
-Ich sitze im Vorstand von <organisation>
-
-Meine Telefonnummer ist <phone number>
-Meine Nummer ist <phone number>
-Meine Handynummer ist <mobile number>
-Meine Mobilnummer ist <mobile number>
-Meine E‑Mail‑Adresse ist <email address>
-Meine Email ist <email address>
-Mein Benutzername ist <username>
+Meine Telefonnummer ist <Nummer>
+Meine Nummer ist <Nummer>
+Meine Handynummer ist <Nummer>
+Meine Mobilnummer ist <Nummer>
+Meine E‑Mail‑Adresse ist <E-mail>
+Meine Email ist <E-mail>
+Mein Benutzername ist <Name>

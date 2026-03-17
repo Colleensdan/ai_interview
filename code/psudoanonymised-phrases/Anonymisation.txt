@@ -1,51 +1,50 @@
 My name is <name>
 I am called <name>
 You can call me <name>
-I go by <name>
+You can call me <name>
+I am called <name>
 I prefer to be called <name>
 My full name is <name>
-My first name is <first name>
-My surname is <surname>
-My family name is <family name>
-My given name is <given name>
+My first name is <name>
+My last name is <name>
+My family name is <name>
+My given/used name is <name>
 
-I’m <age> years old
+I am <age> years old
 My age is <age>
-I was born in <year/place>
-I was born on <date/place>
-My date of birth is <date of birth>
+I was born in <year>
+I was born in the year <year>
+I was born in <place>
+I was born on <date> in <place>
+My date of birth is <date>
 
-I’m originally from <place>
-I’m from <country/region>
+I am originally from <place>
+I come from <place>
 I grew up in <place>
 I currently live in <place>
-I currently reside in <place>
-I’m based in <place>
-I’ve just moved to <place>
-I’ve been living in <place> 
-My postcode is <postcode>
+I live in <place>
+I live at <place>
+I currently live in <place>
+I am based in <place>
+My residence is in <place>
+I have just moved to <place>
+I have been living in <place> for <duration>
+My postcode is <number>
 
 I work for <organisation>
 I work at <organisation>
-I’m employed by <organisation>
-My job title is <job title>
-I work as a <job title>
-I’m employed as a <job title>
-I currently work as a <job title>
+I am employed at <organisation>
 
-I study at <university/institution>
+I study at <university>
 
 My nationality is <nationality>
-I hold <nationality> citizenship
+I have <nationality> citizenship
+I hold <nationality> nationality
+My phone number is <number>
 
-I’m a member of <organisation>
-I’m an active member of <club/society>
-I’m on the board of <organisation>
-
-My phone number is <phone number>
-My mobile number is <mobile number>
-My number is <mobile number>
-My email address is <email address>
-My username is <username>
-My ID is <ID>
-My id is <ID>
+My number is <number>
+My mobile number is <number>
+My mobile number is <number>
+My email address is <email>
+My email is <email>
+My username is <name>
