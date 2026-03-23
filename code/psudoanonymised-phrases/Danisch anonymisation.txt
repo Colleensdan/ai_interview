@@ -1,0 +1,49 @@
+Mit navn er <Navn>
+Jeg hedder <Navn>
+Du kan kalde mig <Navn>
+De kan kalde mig <Navn>
+Jeg kaldes <Navn>
+Jeg foretrækker at blive kaldt <Navn>
+Mit fulde navn er <Navn>
+Mit fornavn er <Navn>
+Mit efternavn er <navn>
+Mit familienavn er <navn>
+Mit kælenavn er <navn>
+
+Jeg er <alder> år gammel
+Min alder er <alder>
+Jeg blev født i <år>
+Jeg blev født i år <år>
+Jeg blev født i <by>
+Jeg blev født den <dato> i <sted>
+Min fødselsdato er <dato>
+
+Jeg kommer oprindeligt fra <by>
+Jeg kommer fra <by>
+Jeg er vokset op i <by>
+Jeg bor i øjeblikket i <by>
+Jeg bor i <by>
+Jeg bor i øjeblikket i <by>
+Jeg er bosiddende i <by>
+Jeg har bopæl i <by>
+Jeg er lige flyttet til <sted>
+Jeg har boet i <sted> siden <tid>
+Mit postnummer er <nummer>
+
+Jeg arbejder for <organisation>
+Jeg arbejder hos <organisation>
+Jeg er ansat hos <organisation>
+
+Jeg studerer på <universitet>
+
+Min nationalitet er <nationalitet>
+Jeg har statsborgerskab i <nationalitet>
+Jeg har statsborgerskab i <nationalitet>
+
+Mit telefonnummer er <nummer>
+Mit nummer er <nummer>
+Mit mobilnummer er <nummer>
+Mit mobilnummer er <nummer>
+Min e-mail-adresse er <e-mail>
+Min e-mail er <e-mail>
+Mit brugernavn er <navn>
