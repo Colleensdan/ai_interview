@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+#WSL identifiers
+*.Identifier
+
 # Distribution / packaging
 .Python
 build/
