@@ -1,0 +1,50 @@
+Mi chiamo <nome>
+Il mio nome è <nome>
+Puoi chiamarmi <nome>
+Può chiamarmi <nome>
+Mi chiamano <nome>
+Preferisco essere chiamato <nome>
+Preferisco essere chiamata <nome>
+Il mio nome completo è <nome>
+Il mio nome è <nome>
+Il mio cognome è <nome>
+Il mio cognome è <nome>
+Il mio nome di battesimo è <nome>
+
+Ho <età> anni
+La mia età è <età>
+Sono nato nel <anno>
+Sono nato nell'anno <anno>
+Sono nato a <luogo>
+Sono nato il <Data> a <luogo>
+La mia data di nascita è <data>
+
+Sono originario di <città>
+Vengo da <città>
+Sono cresciuto a <città>
+Attualmente vivo a <città>
+Vivo a <città>
+Attualmente vivo a <città>
+Sono residente a <città>
+Ho la residenza a <città>
+Mi sono appena trasferito a <luogo>
+Vivo a <luogo> da <tempo>
+Il mio codice postale è <numero>
+
+Lavoro per <organizzazione>
+Lavoro presso <organizzazione>
+Sono dipendente di <organizzazione>
+
+Studio all'<università>
+
+La mia nazionalità è <nazionalità>
+Ho la cittadinanza di <nazionalità>
+Possiedo la cittadinanza di <nazionalità>
+
+Il mio numero di telefono è <numero>
+Il mio numero è <numero>
+Il mio numero di cellulare è <numero>
+Il mio numero di cellulare è <numero>
+Il mio indirizzo e-mail è <e-mail>
+La mia e-mail è <e-mail>
+Il mio nome utente è <nome>
