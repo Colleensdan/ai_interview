@@ -52,6 +52,8 @@ coverage.xml
 cover/
 
 # Translations
+Translations/
+Translations.zip
 *.mo
 *.pot
 
