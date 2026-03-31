@@ -1,0 +1,10 @@
+data/
+secure/
+Translations/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.git/
+.claude/
+.devcontainer/
+*.md
