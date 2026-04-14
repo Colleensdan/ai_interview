@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import streamlit as st
 from dataclasses import dataclass
@@ -140,7 +141,9 @@ SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
 # API parameters
-MODEL = "gpt-5-mini"  # or e.g. "claude-3-5-sonnet-20240620" (OpenAI GPT or Anthropic Claude models)
+# Reads from CJBS_DEPLOYMENT_NAME env var so you can swap models without touching code.
+# Falls back to gpt-4o if the var is unset (e.g. local dev without a .env).
+MODEL = os.getenv("CJBS_DEPLOYMENT_NAME", "gpt-4o")
 TEMPERATURE = None  # (None for default value)
 MAX_OUTPUT_TOKENS = 2048
 
