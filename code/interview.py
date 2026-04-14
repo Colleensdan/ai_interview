@@ -285,11 +285,8 @@ def _build_messages_for_api(include_system):
 def _prepare_api_kwargs():
     """Build API kwargs with sanitized message order."""
 
-    # Use deployment name for Azure OpenAI, otherwise use config.MODEL
-    model_or_deployment = _DEPLOYMENT_NAME if api == "openai" and '_DEPLOYMENT_NAME' in globals() else config.MODEL
-
     kwargs = {
-    "model": model_or_deployment,
+    "model": config.MODEL,
     "max_completion_tokens": config.MAX_OUTPUT_TOKENS,
     }
 
