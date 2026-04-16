@@ -381,6 +381,7 @@ with col2:
         )
 
 
+
 # Upon rerun, display the previous conversation (except system prompt or first message)
 for message in st.session_state.messages[1:]:
 
@@ -393,19 +394,24 @@ for message in st.session_state.messages[1:]:
         with st.chat_message(message["role"], avatar=avatar):
             st.markdown(message["content"])
 
-# Load API client
-if api == "openai":
-    client = OpenAI(api_key=_load_api_key("API_KEY_OPENAI", "OPENAI_API_KEY"))
-elif api == "anthropic":
-    client = anthropic.Anthropic(
-        api_key=_load_api_key("API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY")
-    )
+# Load API client — cached so it's created once per process, not on every rerun
+@st.cache_resource
+def _get_client():
+    if api == "openai":
+        return OpenAI(api_key=_load_api_key("API_KEY_OPENAI", "OPENAI_API_KEY"))
+    else:
+        return anthropic.Anthropic(
+            api_key=_load_api_key("API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY")
+        )
+
+client = _get_client()
 
 # In case the interview history is still empty, pass system prompt to model, and
 # generate and display its first message
 if not st.session_state.messages:
 
     if api == "openai":
+
 
         st.session_state.messages.append(
             {"role": "system", "content": config.SYSTEM_PROMPT}
