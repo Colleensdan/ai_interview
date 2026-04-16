@@ -239,7 +239,7 @@ def _load_api_key():
     """Return an API key from local env"""
     api_key = os.getenv("CJBS_API_KEY")
     api_endpoint = os.getenv("CJBS_API_ENDPOINT")
-    api_version = os.getenv("CJBS_API_VERSION", "2023-05-15")
+    api_version = os.getenv("CJBS_API_VERSION", "2024-10-21")
     deployment_name = os.getenv("CJBS_DEPLOYMENT_NAME")
 
     if not api_key or not api_endpoint:
