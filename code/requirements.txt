@@ -1,9 +1,10 @@
-numpy==1.26.4
 streamlit==1.42.2
 openai==1.63.2
 anthropic==0.46.0
-spacy==3.7.4
 python-dotenv==1.0.1
 requests>=2.31.0
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
-de-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.7.0/de_core_news_sm-3.7.0-py3-none-any.whl
+# spacy, numpy, and the spaCy language models are intentionally omitted.
+# The app uses PhrasePseudonymizer (pure-Python regex) by default.
+# To use InterviewPseudonymizer (spaCy NER), install manually:
+#   pip install spacy numpy
+#   python -m spacy download de_core_news_sm

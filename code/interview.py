@@ -529,23 +529,22 @@ for message in st.session_state.messages[1:]:
         with st.chat_message(message["role"], avatar=avatar):
             st.markdown(message["content"])
 
-# Load API credentials once
-api_key, api_endpoint, api_version, deployment_name = _load_api_key()
+# Load API client — cached so it's created once per process, not on every rerun
+@st.cache_resource
+def _get_client():
+    api_key, api_endpoint, api_version, deployment_name = _load_api_key()
+    if api == "openai":
+        return AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=api_endpoint,
+        ), deployment_name
+    else:
+        return anthropic.Anthropic(
+            api_key=api_key,
+        ), deployment_name
 
-# Store deployment name for use in API calls
-_DEPLOYMENT_NAME = deployment_name
-
-# Load API client
-if api == "openai":
-    client = AzureOpenAI(
-        api_key=api_key,
-        api_version=api_version,
-        azure_endpoint=api_endpoint
-    )
-elif api == "anthropic":
-    client = anthropic.Anthropic(
-        api_key=_load_api_key("API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY")
-    )
+client, _DEPLOYMENT_NAME = _get_client()
 
 # In case the interview history is still empty, pass system prompt to model, and
 # generate and display its first message
