@@ -39,12 +39,15 @@ except Exception as e:
     st.stop()
 
 
-if cfg.variant == "deforestation":
-    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
-elif cfg.variant == "combustion":
-    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
-else:
-    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+@st.cache_data
+def _load_interview_outline(variant: str) -> str:
+    if variant == "deforestation":
+        return (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
+    elif variant == "combustion":
+        return (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
+    raise ValueError(f"Unknown variant: {variant}")
+
+INTERVIEW_OUTLINE = _load_interview_outline(cfg.variant)
 
 SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
@@ -432,13 +435,13 @@ else:
             _ts = time.strftime("%Y%m%d_%H%M%S")
             st.session_state.username = f"non-qualtrics-participant-{_ts}"
 
-# Create directories if they do not already exist
-if not os.path.exists(config.TRANSCRIPTS_DIRECTORY):
-    os.makedirs(config.TRANSCRIPTS_DIRECTORY)
-if not os.path.exists(config.TIMES_DIRECTORY):
-    os.makedirs(config.TIMES_DIRECTORY)
-if not os.path.exists(config.BACKUPS_DIRECTORY):
-    os.makedirs(config.BACKUPS_DIRECTORY)
+@st.cache_resource
+def _ensure_data_dirs():
+    os.makedirs(config.TRANSCRIPTS_DIRECTORY, exist_ok=True)
+    os.makedirs(config.TIMES_DIRECTORY, exist_ok=True)
+    os.makedirs(config.BACKUPS_DIRECTORY, exist_ok=True)
+
+_ensure_data_dirs()
 
 
 # Initialise session state
@@ -457,20 +460,26 @@ if "start_time" not in st.session_state:
     )
 
 # ---------------------------------------------------------------------------
-# SharePoint connectivity check (runs once per browser session)
+# SharePoint connectivity check (runs once per process, shared across sessions)
 # ---------------------------------------------------------------------------
-if "sp_checked" not in st.session_state:
-    st.session_state.sp_checked = True
-    if _sp._sp_configured():
-        try:
-            _sp.verify_connectivity()
-            st.session_state["sp_ok"] = True
-        except Exception as _sp_err:
-            logging.getLogger("ai_interview").error(
-                "SharePoint connectivity check FAILED at startup: %s", _sp_err
-            )
-            st.session_state["sp_ok"] = False
-            st.session_state["sp_error"] = str(_sp_err)
+@st.cache_resource
+def _check_sharepoint() -> tuple:
+    if not _sp._sp_configured():
+        return None, None
+    try:
+        _sp.verify_connectivity()
+        return True, None
+    except Exception as err:
+        logging.getLogger("ai_interview").error(
+            "SharePoint connectivity check FAILED: %s", err
+        )
+        return False, str(err)
+
+_sp_ok, _sp_err = _check_sharepoint()
+if "sp_ok" not in st.session_state and _sp_ok is not None:
+    st.session_state["sp_ok"] = _sp_ok
+    if _sp_err:
+        st.session_state["sp_error"] = _sp_err
 
 # Persistent error banner — shown on every rerun if SP is known to be broken
 if st.session_state.get("sp_ok") is False or st.session_state.get("sp_upload_failed"):
