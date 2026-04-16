@@ -5,3 +5,7 @@ gatherUsageStats = false
 [client]
 # Minimal appearance of user interface
 toolbarMode = "minimal"
+
+[server]
+# Disable file-watcher in production — polling the filesystem wastes CPU on Render
+fileWatcherType = "none"
