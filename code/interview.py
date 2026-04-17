@@ -17,7 +17,7 @@ from pseudonymizer import _apply_mappings_to_messages
 import os
 from pathlib import Path
 import tomllib
-from openai import AzureOpenAI, APIError
+from openai import APIError
 from dotenv import load_dotenv
 import sharepoint as _sp
 
@@ -239,21 +239,37 @@ MAPPING_HANDLER = _persist_mapping if _MAPPING_DIR else None
 
 
 def _load_api_key():
-    """Return an API key from local env"""
-    api_key = os.getenv("CJBS_API_KEY")
-    api_endpoint = os.getenv("CJBS_API_ENDPOINT")
-    api_version = os.getenv("CJBS_API_VERSION", "2023-05-15")
+    """Return API credentials from local env.
+
+    Supports two providers — whichever credentials are present are used:
+      Azure OpenAI: set CJBS_API_KEY + CJBS_API_ENDPOINT (+ optionally CJBS_API_VERSION)
+      Plain OpenAI: set OPENAI_API_KEY
+    Azure takes precedence if both are set.
+    """
+    azure_key      = os.getenv("CJBS_API_KEY")
+    azure_endpoint = os.getenv("CJBS_API_ENDPOINT")
+    api_version    = os.getenv("CJBS_API_VERSION", "2023-05-15")
+    openai_key     = os.getenv("OPENAI_API_KEY")
     deployment_name = os.getenv("CJBS_DEPLOYMENT_NAME")
 
-    if not api_key or not api_endpoint:
-        raise ValueError("Please set CJBS_API_KEY and CJBS_API_ENDPOINT in your .env file.")
-        
-
     if not deployment_name:
-        raise ValueError("Error: Please set CJBS_DEPLOYMENT_NAME in your .env file (e.g., 'gpt-4.1').")
-        
+        raise ValueError("Please set CJBS_DEPLOYMENT_NAME in your .env file (e.g., 'gpt-4o').")
 
-    return api_key, api_endpoint, api_version, deployment_name
+    if azure_key and azure_endpoint:
+        if openai_key:
+            logging.warning(
+                "Both Azure (CJBS_API_KEY + CJBS_API_ENDPOINT) and plain OpenAI "
+                "(OPENAI_API_KEY) credentials are set — using Azure."
+            )
+        return "azure", azure_key, azure_endpoint, api_version, deployment_name
+    elif openai_key:
+        return "openai", openai_key, None, None, deployment_name
+    else:
+        raise ValueError(
+            "No OpenAI API credentials found. Set either:\n"
+            "  Azure OpenAI:  CJBS_API_KEY + CJBS_API_ENDPOINT\n"
+            "  Plain OpenAI:  OPENAI_API_KEY"
+        )
 
 
 def _sanitize_message_for_api(message):
@@ -541,17 +557,17 @@ for message in st.session_state.messages[1:]:
 # Load API client — cached so it's created once per process, not on every rerun
 @st.cache_resource
 def _get_client():
-    api_key, api_endpoint, api_version, deployment_name = _load_api_key()
+    provider, key, endpoint, version, deployment_name = _load_api_key()
     if api == "openai":
-        return AzureOpenAI(
-            api_key=api_key,
-            api_version=api_version,
-            azure_endpoint=api_endpoint,
-        ), deployment_name
+        if provider == "azure":
+            from openai import AzureOpenAI
+            client = AzureOpenAI(api_key=key, api_version=version, azure_endpoint=endpoint)
+        else:
+            from openai import OpenAI
+            client = OpenAI(api_key=key)
+        return client, deployment_name
     else:
-        return anthropic.Anthropic(
-            api_key=api_key,
-        ), deployment_name
+        return anthropic.Anthropic(api_key=key), deployment_name
 
 client, _DEPLOYMENT_NAME = _get_client()
 
