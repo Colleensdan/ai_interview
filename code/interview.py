@@ -475,38 +475,6 @@ if "start_time" not in st.session_state:
         "%Y_%m_%d_%H_%M_%S", time.localtime(st.session_state.start_time)
     )
 
-# ---------------------------------------------------------------------------
-# SharePoint connectivity check (runs once per process, shared across sessions)
-# ---------------------------------------------------------------------------
-@st.cache_resource
-def _check_sharepoint() -> tuple:
-    if not _sp._sp_configured():
-        return None, None
-    try:
-        _sp.verify_connectivity()
-        return True, None
-    except Exception as err:
-        logging.getLogger("ai_interview").error(
-            "SharePoint connectivity check FAILED: %s", err
-        )
-        return False, str(err)
-
-_sp_ok, _sp_err = _check_sharepoint()
-if "sp_ok" not in st.session_state and _sp_ok is not None:
-    st.session_state["sp_ok"] = _sp_ok
-    if _sp_err:
-        st.session_state["sp_error"] = _sp_err
-
-# Persistent error banner — shown on every rerun if SP is known to be broken
-if st.session_state.get("sp_ok") is False or st.session_state.get("sp_upload_failed"):
-    st.error(
-        "**SharePoint storage is not working.** "
-        "Interview data is being saved to the server's local disk only and will be "
-        "**lost if the server restarts**. "
-        f"Error: {st.session_state.get('sp_error', 'upload failure — see Render logs')}. "
-        "Please contact the administrator before continuing."
-    )
-
 # Check if interview previously completed
 interview_previously_completed = check_if_interview_completed(
     config.TIMES_DIRECTORY, st.session_state.username
