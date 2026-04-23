@@ -119,6 +119,37 @@ CLOSING_MESSAGES = {}
 CLOSING_MESSAGES["5j3k"] = "Dziękujemy za udział, wywiad dobiega końca."
 CLOSING_MESSAGES["x7y8"] = "Dziękujemy za udział w wywiadzie, to było ostatnie pytanie. Proszę przejść do pozostałych części ankiety. Serdecznie dziękujemy za Państwa odpowiedzi i czas poświęcony na pomoc w tym projekcie badawczym!"
 
+# Function tools for OpenAI/Azure — replace code-based termination to avoid content-filter false positives
+TERMINATION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "end_interview",
+            "description": (
+                "Użyj tej funkcji gdy zadasz wszystkie pytania lub gdy respondent "
+                "nie chce kontynuować wywiadu."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flag_problematic_content",
+            "description": (
+                "Użyj tej funkcji gdy respondent napisze coś prawnie lub "
+                "etycznie problematycznego."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+TOOL_CLOSING_MESSAGES = {
+    "end_interview":            CLOSING_MESSAGES["x7y8"],
+    "flag_problematic_content": CLOSING_MESSAGES["5j3k"],
+}
+
 cfg = load_config()
 
 if cfg.variant == "deforestation":
@@ -137,6 +168,12 @@ SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
 {CODES}"""
+
+# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
+SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
+
+
+{GENERAL_INSTRUCTIONS}"""
 
 
 # API parameters
