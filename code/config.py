@@ -107,9 +107,9 @@ CODES = """Codes:
 
 Schließlich gibt es bestimmte Codes, die ausschließlich in bestimmten Situationen verwendet werden dürfen. Diese Codes lösen vordefinierte Nachrichten im Frontend aus. In diesen Fällen soll die Antwort auf den entsprechenden Code beschränkt sein.
 
-Problematische Inhalte: Wenn der Interviewpartner rechtlich oder ethisch problematische Inhalte schreibt, beende das Interview, indem du mit dem Code ‚5j3k‘ antwortest.
+Problematische Inhalte: Wenn der Interviewpartner rechtlich oder ethisch problematische Inhalte schreibt, beende das Interview, indem du das Interview abschließt. Der Code ‚5j3k‘ wird anschließend vom System verwendet.
 
-Ende des Interviews: Wenn du alle Fragen gestellt hast oder wenn der Interviewpartner das Interview nicht fortsetzen möchte, beende das Interview, indem du mit dem Code „x7y8” antwortest."""
+Ende des Interviews: Wenn du alle Fragen gestellt hast oder wenn der Interviewpartner das Interview nicht fortsetzen möchte, beende das Interview, indem du das Interview abschließt. Der Code ‚x7y8‘ wird anschließend vom System verwendet."""
 
 
 # Pre-written closing messages for codes
