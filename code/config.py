@@ -38,10 +38,10 @@ def load_config() -> AppConfig:
         raise RuntimeError(
             f"Missing secrets for variant '{variant}'"
         )
-     
+
 
     vcfg = variants[variant]
-    """   
+    """
 
     return AppConfig(
         variant=variant
@@ -50,7 +50,7 @@ def load_config() -> AppConfig:
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
-prompts_dir = PROJECT_ROOT / "prompts" 
+prompts_dir = PROJECT_ROOT / "prompts"
 
 """
 # Interview outline
@@ -65,7 +65,7 @@ except Exception as e:
 
 
 
-#INTERVIEW PROMPTS 
+#INTERVIEW PROMPTS
 if cfg.variant == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
 elif cfg.variant == "combustion_engine":
@@ -92,13 +92,13 @@ GENERAL_INSTRUCTIONS = f"""Durante l'intervista, ponete fino a circa 12 domande 
 
 [L'UE vuole allentare il divieto previsto sui motori a combustione
 
-Le auto con motori a combustione bruciano benzina o diesel e inquinano l'ambiente. Emettono gas serra e contribuiscono al cambiamento climatico. Per questo motivo, nel marzo 2023 la Commissione europea ha deciso di vietare la vendita di auto nuove con motori a combustione a partire dal 2035. Il divieto faceva parte del Green Deal dell'Unione europea, un pacchetto di misure volte a raggiungere la neutralità climatica entro il 2050. Ma l’atmosfera politica è cambiata. Diverse misure di politica ambientale sono ora in fase di rivalutazione e revisione.
+Le auto con motori a combustione bruciano benzina o diesel e inquinano l'ambiente. Emettono gas serra e contribuiscono al cambiamento climatico. Per questo motivo, nel marzo 2023 la Commissione europea ha deciso di vietare la vendita di auto nuove con motori a combustione a partire dal 2035. Il divieto faceva parte del Green Deal dell'Unione europea, un pacchetto di misure volte a raggiungere la neutralità climatica entro il 2050. Ma l'atmosfera politica è cambiata. Diverse misure di politica ambientale sono ora in fase di rivalutazione e revisione.
 
-Un esempio lampante è l'allentamento da parte della Commissione del divieto sui veicoli con motori a combustione. Secondo la nuova proposta, i nuovi veicoli prodotti dovranno emettere in media solo il 90% in meno di CO₂, invece che zero CO₂. Ciò lascia spazio alla vendita continuativa di veicoli con motori a combustione, ibridi plug-in e modelli elettrici con piccoli motori ausiliari a benzina. Tuttavia, le loro emissioni dovranno essere compensate dall'uso di acciaio verde e combustibili rinnovabili. 
+Un esempio lampante è l'allentamento da parte della Commissione del divieto sui veicoli con motori a combustione. Secondo la nuova proposta, i nuovi veicoli prodotti dovranno emettere in media solo il 90% in meno di CO₂, invece che zero CO₂. Ciò lascia spazio alla vendita continuativa di veicoli con motori a combustione, ibridi plug-in e modelli elettrici con piccoli motori ausiliari a benzina. Tuttavia, le loro emissioni dovranno essere compensate dall'uso di acciaio verde e combustibili rinnovabili.
 
 Il governo italiano ha accolto con favore i piani della Commissione europea come un passo nella giusta direzione verso una maggiore flessibilità per i produttori e l'allineamento degli obiettivi climatici con le realtà del mercato, le imprese e l'occupazione. Tuttavia, la transizione verso la mobilità elettrica ha subito un rallentamento.]
 
-Poni una domanda alla volta e non numerare le domande. Inizia l'intervista con: “Ciao! Sono lieto di parlarti oggi. In generale, cosa ne pensi dei cambiamenti alla normativa sul divieto dei motori a combustione? Se qualcosa non ti è chiaro, non esitare a chiedere”.
+Poni una domanda alla volta e non numerare le domande. Inizia l'intervista con: "Ciao! Sono lieto di parlarti oggi. In generale, cosa ne pensi dei cambiamenti alla normativa sul divieto dei motori a combustione? Se qualcosa non ti è chiaro, non esitare a chiedere".
 
 Poni domande che facciano riferimento a tre aspetti generali delle risposte alla deregolamentazione ambientale: (1) Comportamentale: in che modo viene influenzato il comportamento dell'intervistato rispetto all'acquisto di automobili? E il comportamento pro-ambientale in generale? (2) Emozioni e sentimenti: in che modo i sentimenti e le emozioni dell'intervistato vengono influenzati dalla deregolamentazione ambientale? (3) Cognitivo: in che modo la deregolamentazione influenza le convinzioni e i giudizi? Inoltre, esplora in che modo la deregolamentazione modifica la percezione delle norme sociali e la fiducia nelle istituzioni, se opportuno.
 Dopo aver posto tutte le domande, chiedi all'intervistato se desidera aggiungere ulteriori aspetti. In caso contrario, concludi l'intervista.
@@ -115,9 +115,9 @@ CODES = """Codici:
 
 Infine, esistono codici specifici che devono essere utilizzati esclusivamente in situazioni ben precise. Questi codici attivano messaggi predefiniti nel front-end, quindi è fondamentale rispondere solo con il codice esatto, senza aggiungere altro testo come un messaggio di saluto o qualsiasi altro commento.
 
-Contenuti problematici: se l'intervistato scrive contenuti problematici dal punto di vista legale o etico, si prega di rispondere solo con il codice “5j3k” e nessun altro testo.
+Contenuti problematici: se l'intervistato scrive contenuti problematici dal punto di vista legale o etico, si prega di rispondere solo con il codice "5j3k" e nessun altro testo.
 
-Fine dell'intervista: quando sono state poste tutte le domande o quando l'intervistato non desidera continuare l'intervista, si prega di rispondere solo con il codice “x7y8” e nessun altro testo.
+Fine dell'intervista: quando sono state poste tutte le domande o quando l'intervistato non desidera continuare l'intervista, si prega di rispondere solo con il codice "x7y8" e nessun altro testo.
 
 """
 
@@ -126,6 +126,36 @@ CLOSING_MESSAGES = {}
 CLOSING_MESSAGES["5j3k"] = "Grazie per aver partecipato, l'intervista finisce qui."
 CLOSING_MESSAGES["x7y8"] = "Grazie per aver partecipato all'intervista, questa era l'ultima domanda. Si prega di continuare con le sezioni rimanenti nella parte dedicata al sondaggio. Grazie mille per le risposte e per il tempo dedicato a questo progetto di ricerca!"
 
+# Function tools for OpenAI/Azure — replace code-based termination to avoid content-filter false positives
+TERMINATION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "end_interview",
+            "description": (
+                "Utilizza questa funzione quando hai posto tutte le domande o quando "
+                "l'intervistato non desidera continuare l'intervista."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flag_problematic_content",
+            "description": (
+                "Utilizza questa funzione quando l'intervistato scrive contenuti "
+                "problematici dal punto di vista legale o etico."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+TOOL_CLOSING_MESSAGES = {
+    "end_interview":            CLOSING_MESSAGES["x7y8"],
+    "flag_problematic_content": CLOSING_MESSAGES["5j3k"],
+}
 
 cfg = load_config()
 
@@ -145,6 +175,12 @@ SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
 {CODES}"""
+
+# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
+SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
+
+
+{GENERAL_INSTRUCTIONS}"""
 
 
 # API parameters
