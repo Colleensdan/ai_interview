@@ -38,10 +38,10 @@ def load_config() -> AppConfig:
         raise RuntimeError(
             f"Missing secrets for variant '{variant}'"
         )
-     
+
 
     vcfg = variants[variant]
-    """   
+    """
 
     return AppConfig(
         variant=variant
@@ -50,7 +50,7 @@ def load_config() -> AppConfig:
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
-prompts_dir = PROJECT_ROOT / "prompts" 
+prompts_dir = PROJECT_ROOT / "prompts"
 
 """
 # Interview outline
@@ -65,7 +65,7 @@ except Exception as e:
 
 
 
-#INTERVIEW PROMPTS 
+#INTERVIEW PROMPTS
 if cfg.variant == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
 elif cfg.variant == "combustion_engine":
@@ -118,7 +118,37 @@ Afslutning af interviewet: Når du har stillet alle spørgsmål, eller når resp
 CLOSING_MESSAGES = {}
 CLOSING_MESSAGES["5j3k"] = "Tak for din deltagelse, interviewet er hermed afsluttet."
 CLOSING_MESSAGES["x7y8"] = "Tak fordi du deltog i interviewet. Dette var det sidste spørgsmål. Fortsæt venligst med de resterende afsnit i undersøgelsesdelen. Mange tak for dine svar og din tid til at hjælpe med dette forskningsprojekt!"
-""
+
+# Function tools for OpenAI/Azure — replace code-based termination to avoid content-filter false positives
+TERMINATION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "end_interview",
+            "description": (
+                "Brug denne funktion når du har stillet alle spørgsmål, eller når "
+                "respondenten ikke ønsker at fortsætte interviewet."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flag_problematic_content",
+            "description": (
+                "Brug denne funktion når respondenten skriver juridisk eller "
+                "etisk problematisk indhold."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+TOOL_CLOSING_MESSAGES = {
+    "end_interview":            CLOSING_MESSAGES["x7y8"],
+    "flag_problematic_content": CLOSING_MESSAGES["5j3k"],
+}
 
 cfg = load_config()
 
@@ -138,6 +168,12 @@ SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
 {CODES}"""
+
+# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
+SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
+
+
+{GENERAL_INSTRUCTIONS}"""
 
 
 # API parameters
