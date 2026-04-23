@@ -49,6 +49,37 @@ CLOSING_MESSAGES["x7y8"] = (
     "Thank you for participating in the interview, this was the last question. Please continue with the remaining sections in the survey part. Many thanks for your answers and time to help with this research project!"
 )
 
+# Function tools for OpenAI/Azure — replace code-based termination to avoid content-filter false positives
+TERMINATION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "end_interview",
+            "description": (
+                "Call this when all interview questions have been asked or the "
+                "respondent does not want to continue the interview."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flag_problematic_content",
+            "description": (
+                "Call this when the respondent writes something legally or "
+                "ethically problematic."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+TOOL_CLOSING_MESSAGES = {
+    "end_interview":            CLOSING_MESSAGES["x7y8"],
+    "flag_problematic_content": CLOSING_MESSAGES["5j3k"],
+}
+
 
 # System prompt
 SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
@@ -58,6 +89,12 @@ SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
 {CODES}"""
+
+# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
+SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
+
+
+{GENERAL_INSTRUCTIONS}"""
 
 
 # API parameters

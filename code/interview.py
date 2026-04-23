@@ -223,7 +223,10 @@ def _build_messages_for_api(include_system):
 
     messages = []
     if include_system:
-        messages.append({"role": "system", "content": config.SYSTEM_PROMPT})
+        system_prompt = (
+            config.SYSTEM_PROMPT_OPENAI if api == "openai" else config.SYSTEM_PROMPT
+        )
+        messages.append({"role": "system", "content": system_prompt})
 
     for message in st.session_state.messages:
         if message["role"] == "system":
@@ -250,6 +253,7 @@ def _prepare_api_kwargs():
     if api == "openai":
         kwargs["stream"] = True
         kwargs["messages"] = _build_messages_for_api(include_system=True)
+        kwargs["tools"] = config.TERMINATION_TOOLS
     else:
         kwargs["system"] = config.SYSTEM_PROMPT
         kwargs["messages"] = _build_messages_for_api(include_system=False)
@@ -490,24 +494,43 @@ if st.session_state.interview_active:
 
                 # Initialise message of interviewer
                 message_interviewer = ""
+                # For OpenAI: name of the termination tool that fired, or None for normal response
+                tool_call_triggered = None
 
                 if api == "openai":
+
+                    _tool_name_buffer = ""
 
                     # Stream responses
                     stream = client.chat.completions.create(**_prepare_api_kwargs())
 
                     for message in stream:
-                        text_delta = message.choices[0].delta.content
-                        if text_delta != None:
-                            message_interviewer += text_delta
-                        # Start displaying message only after 5 characters to first check for codes
+                        if message.choices and len(message.choices) > 0:
+                            delta = message.choices[0].delta
+
+                            # Accumulate text content
+                            if delta.content:
+                                message_interviewer += delta.content
+
+                            # Accumulate tool call function name (arrives in chunks)
+                            if delta.tool_calls:
+                                for tc in delta.tool_calls:
+                                    if tc.function and tc.function.name:
+                                        _tool_name_buffer += tc.function.name
+
+                            # Identify a known termination tool
+                            if tool_call_triggered is None:
+                                for fn_name in config.TOOL_CLOSING_MESSAGES:
+                                    if fn_name in _tool_name_buffer:
+                                        tool_call_triggered = fn_name
+                                        break
+
+                        # Start displaying message only after 5 characters
                         if len(message_interviewer) > 5:
                             message_placeholder.markdown(message_interviewer + "▌")
-                        if any(
-                            code in message_interviewer
-                            for code in config.CLOSING_MESSAGES.keys()
-                        ):
-                            # Stop displaying the progress of the message in case of a code
+
+                        # Stop stream when a termination tool is detected
+                        if tool_call_triggered:
                             message_placeholder.empty()
                             break
 
@@ -529,10 +552,15 @@ if st.session_state.interview_active:
                                 message_placeholder.empty()
                                 break
 
-                # If no code is in the message, display and store the message
-                if not any(
-                    code in message_interviewer for code in config.CLOSING_MESSAGES.keys()
-                ):
+                # Determine whether a termination signal was received
+                terminated = (
+                    tool_call_triggered is not None
+                    if api == "openai"
+                    else any(code in message_interviewer for code in config.CLOSING_MESSAGES)
+                )
+
+                # If no termination signal, display and store the message
+                if not terminated:
 
                     message_placeholder.markdown(message_interviewer)
                     st.session_state.messages.append(
@@ -556,36 +584,47 @@ if st.session_state.interview_active:
 
                         pass
 
-            # If code in the message, display the associated closing message instead
-            # Loop over all codes
-            for code in config.CLOSING_MESSAGES.keys():
+            # If a termination signal was received, display the associated closing message
+            # Resolve which closing message to show based on provider
+            if api == "openai":
+                _closing_key = tool_call_triggered
+            else:
+                _closing_key = next(
+                    (code for code in config.CLOSING_MESSAGES if code in message_interviewer),
+                    None,
+                )
 
-                if code in message_interviewer:
-                    # Store message in list of messages
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": message_interviewer}
+            if _closing_key:
+                closing_message = (
+                    config.TOOL_CLOSING_MESSAGES[_closing_key]
+                    if api == "openai"
+                    else config.CLOSING_MESSAGES[_closing_key]
+                )
+
+                # Store message in list of messages
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": message_interviewer}
+                )
+
+                # Set chat to inactive and display closing message
+                st.session_state.interview_active = False
+                st.markdown(closing_message)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": closing_message}
+                )
+
+                # Store final transcript and time
+                final_transcript_stored = False
+                while final_transcript_stored == False:
+
+                    save_interview_data(
+                        username=st.session_state.username,
+                        transcripts_directory=config.TRANSCRIPTS_DIRECTORY,
+                        times_directory=config.TIMES_DIRECTORY,
+                        mapping_handler=MAPPING_HANDLER,
                     )
 
-                    # Set chat to inactive and display closing message
-                    st.session_state.interview_active = False
-                    closing_message = config.CLOSING_MESSAGES[code]
-                    st.markdown(closing_message)
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": closing_message}
+                    final_transcript_stored = check_if_interview_completed(
+                        config.TRANSCRIPTS_DIRECTORY, st.session_state.username
                     )
-
-                    # Store final transcript and time
-                    final_transcript_stored = False
-                    while final_transcript_stored == False:
-
-                        save_interview_data(
-                            username=st.session_state.username,
-                            transcripts_directory=config.TRANSCRIPTS_DIRECTORY,
-                            times_directory=config.TIMES_DIRECTORY,
-                            mapping_handler=MAPPING_HANDLER,
-                        )
-
-                        final_transcript_stored = check_if_interview_completed(
-                            config.TRANSCRIPTS_DIRECTORY, st.session_state.username
-                        )
-                        time.sleep(0.1)
+                    time.sleep(0.1)
