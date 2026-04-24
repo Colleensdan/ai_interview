@@ -574,16 +574,28 @@ if not st.session_state.messages:
         {"role": "assistant", "content": message_interviewer}
     )
 
-    # Store first backup files to record who started the interview
-    save_interview_data(
-        username=st.session_state.username,
-        transcripts_directory=config.BACKUPS_DIRECTORY,
-        times_directory=config.BACKUPS_DIRECTORY,
-        file_name_addition_transcript=f"_transcript_started_{st.session_state.start_time_file_names}",
-        file_name_addition_time=f"_time_started_{st.session_state.start_time_file_names}",
-        mapping_handler=MAPPING_HANDLER,
-        variant=cfg.variant,
-    )
+    # Store first backup files in background so the chat input isn't delayed
+    def _do_initial_backup(username, start_time):
+        try:
+            save_interview_data(
+                username=username,
+                transcripts_directory=config.BACKUPS_DIRECTORY,
+                times_directory=config.BACKUPS_DIRECTORY,
+                file_name_addition_transcript=f"_transcript_started_{start_time}",
+                file_name_addition_time=f"_time_started_{start_time}",
+                mapping_handler=MAPPING_HANDLER,
+                variant=cfg.variant,
+            )
+        except Exception as _err:
+            logging.getLogger("ai_interview").error(
+                "Initial backup failed for user '%s': %s", username, _err
+            )
+
+    threading.Thread(
+        target=_do_initial_backup,
+        args=(st.session_state.username, st.session_state.start_time_file_names),
+        daemon=True,
+    ).start()
 
 
 # Main chat if interview is active
