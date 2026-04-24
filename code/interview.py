@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import sys
+import threading
 import streamlit as st
 import streamlit.components.v1 as components
 import time
@@ -637,7 +638,25 @@ if st.session_state.interview_active:
                     _tool_name_buffer = ""
 
                     # Stream responses
-                    stream = client.chat.completions.create(**_prepare_api_kwargs())
+                    try:
+                        stream = client.chat.completions.create(**_prepare_api_kwargs())
+                    except Exception as _api_err:
+                        from openai import BadRequestError as _BadRequestError
+                        if (
+                            isinstance(_api_err, _BadRequestError)
+                            and getattr(_api_err, "code", None) == "content_filter"
+                        ):
+                            _refusal = (
+                                "I must follow the study instructions exactly and cannot "
+                                "comply with that request. Please continue by sharing more "
+                                "about your education or occupation choices."
+                            )
+                            message_placeholder.markdown(_refusal)
+                            st.session_state.messages.append(
+                                {"role": "assistant", "content": _refusal}
+                            )
+                            st.rerun()
+                        raise
 
                     for message in stream:
                         # Check if choices exist in this chunk
@@ -709,25 +728,29 @@ if st.session_state.interview_active:
                         {"role": "assistant", "content": _pseudonymized_assistant_msg}
                     )
 
-                    # Regularly store interview progress as backup, but prevent script from
-                    # stopping in case of a write error
-                    try:
+                    # Fire-and-forget backup upload so the UI isn't blocked by SharePoint I/O
+                    def _do_backup(username, start_time):
+                        try:
+                            save_interview_data(
+                                username=username,
+                                transcripts_directory=config.BACKUPS_DIRECTORY,
+                                times_directory=config.BACKUPS_DIRECTORY,
+                                file_name_addition_transcript=f"_transcript_started_{start_time}",
+                                file_name_addition_time=f"_time_started_{start_time}",
+                                mapping_handler=MAPPING_HANDLER,
+                                variant=cfg.variant,
+                            )
+                        except Exception as _backup_err:
+                            logging.getLogger("ai_interview").error(
+                                "Backup save failed for user '%s': %s",
+                                username, _backup_err,
+                            )
 
-                        save_interview_data(
-                            username=st.session_state.username,
-                            transcripts_directory=config.BACKUPS_DIRECTORY,
-                            times_directory=config.BACKUPS_DIRECTORY,
-                            file_name_addition_transcript=f"_transcript_started_{st.session_state.start_time_file_names}",
-                            file_name_addition_time=f"_time_started_{st.session_state.start_time_file_names}",
-                            mapping_handler=MAPPING_HANDLER,
-                            variant=cfg.variant,
-                        )
-
-                    except Exception as _backup_err:
-                        logging.getLogger("ai_interview").error(
-                            "Backup save failed for user '%s': %s",
-                            st.session_state.username, _backup_err,
-                        )
+                    threading.Thread(
+                        target=_do_backup,
+                        args=(st.session_state.username, st.session_state.start_time_file_names),
+                        daemon=True,
+                    ).start()
 
             # If a termination signal was received, display the associated closing message
             # Resolve which closing message to show based on provider
