@@ -39,6 +39,16 @@ if not logger.handlers:
     logger.addHandler(_handler)
     logger.setLevel(logging.INFO)
 
+# Shared timing logger (also configured in interview.py and sharepoint.py).
+timing_logger = logging.getLogger("ai_interview.timing")
+if not timing_logger.handlers:
+    _t_handler = logging.StreamHandler(sys.stderr)
+    _t_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    timing_logger.addHandler(_t_handler)
+    timing_logger.setLevel(logging.INFO)
+
 
 PROMPT_INJECTION_PATTERNS = [
     "ignore previous instructions",
@@ -118,6 +128,8 @@ def save_interview_data(
     file_name_addition_time="",
     mapping_handler: Optional[Callable[[List[EntityMapping]], None]] = None,
     variant: str = "",
+    messages=None,
+    start_time=None,
 ):
     """Write interview data to disk after applying privacy-preserving sanitisation.
 
@@ -128,11 +140,24 @@ def save_interview_data(
     If `variant` is provided (e.g. "combustion", "deforestation") files are
     uploaded to SharePoint under incoming/{variant}/{subfolder}/ so data from
     different interview variants is kept separate.
+
+    `messages` and `start_time` must be passed when calling from a background thread
+    (which has no Streamlit ScriptRunContext). When omitted they are read from
+    st.session_state, which works fine on the main thread.
     """
 
+    _t_save_start = time.perf_counter()
+
+    if messages is None:
+        messages = st.session_state.messages
+    if start_time is None:
+        start_time = st.session_state.start_time
+
+    _t_pseud_start = time.perf_counter()
     pseudonymized_messages, mappings = pseudonymize_messages(
-        PSEUDONYMIZER, st.session_state.messages
+        PSEUDONYMIZER, messages
     )
+    _pseud_ms = (time.perf_counter() - _t_pseud_start) * 1000
 
     # Build file content in memory so it can be saved locally and uploaded to SharePoint
     transcript_filename = f"{username}{file_name_addition_transcript}.txt"
@@ -141,24 +166,30 @@ def save_interview_data(
         for message in pseudonymized_messages
     )
 
-    duration = (time.time() - st.session_state.start_time) / 60
+    duration = (time.time() - start_time) / 60
     times_filename = f"{username}{file_name_addition_time}.txt"
     times_content = (
-        f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(st.session_state.start_time))}\n"
+        f"Start time (UTC): {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(start_time))}\n"
         f"Interview duration (minutes): {duration:.2f}"
     )
 
+    _t_local_start = time.perf_counter()
     # Store chat transcript locally
-    with open(os.path.join(transcripts_directory, transcript_filename), "w") as t:
+    with open(os.path.join(transcripts_directory, transcript_filename), "w", encoding="utf-8") as t:
         t.write(transcript_content)
 
     # Store file with start time and duration of interview locally
-    with open(os.path.join(times_directory, times_filename), "w") as d:
+    with open(os.path.join(times_directory, times_filename), "w", encoding="utf-8") as d:
         d.write(times_content)
+    _local_ms = (time.perf_counter() - _t_local_start) * 1000
 
     # Upload to SharePoint (non-fatal: log + flag but do not interrupt the interview).
     # Path: incoming/{variant}/{data-type}/ mirroring the local data/ layout.
-    if _sp._sp_configured():
+    _sp_configured = _sp._sp_configured()
+    _sp_total_ms = -1.0
+    _sp_status = "skipped"
+    if _sp_configured:
+        _t_sp_start = time.perf_counter()
         _type_t = Path(transcripts_directory).name   # e.g. "transcripts" or "backups"
         _type_d = Path(times_directory).name         # e.g. "times" or "backups"
         transcript_subfolder = f"{variant}/{_type_t}" if variant else _type_t
@@ -166,7 +197,9 @@ def save_interview_data(
         try:
             _sp.upload_text(transcript_filename, transcript_content, subfolder=transcript_subfolder)
             _sp.upload_text(times_filename, times_content, subfolder=times_subfolder)
+            _sp_status = "ok"
         except Exception as sp_err:
+            _sp_status = "fail"
             logger.error(
                 "SharePoint upload FAILED for user '%s' (data saved locally): %s",
                 username, sp_err,
@@ -178,9 +211,19 @@ def save_interview_data(
                 f"SharePoint upload failed — interview data is saved locally on "
                 f"the server only. Please notify the administrator. Error: {sp_err}"
             )
+        _sp_total_ms = (time.perf_counter() - _t_sp_start) * 1000
 
     if mapping_handler:
         mapping_handler(mappings)
+
+    _kind = Path(transcripts_directory).name  # "backups" or "transcripts"
+    timing_logger.info(
+        "SAVE_TIMING kind=%s user='%s' pseud_ms=%.1f local_ms=%.1f "
+        "sp_configured=%s sp_status=%s sp_total_ms=%.1f total_ms=%.1f",
+        _kind, username, _pseud_ms, _local_ms,
+        str(_sp_configured).lower(), _sp_status, _sp_total_ms,
+        (time.perf_counter() - _t_save_start) * 1000,
+    )
 
     return mappings
 
