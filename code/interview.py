@@ -601,9 +601,8 @@ if st.session_state.interview_active and message_respondent:
         with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
             st.markdown(message_respondent)
         refusal_message = (
-            "I must follow the study instructions exactly and cannot comply with that "
-            "request. Please continue by sharing more about your education or "
-            "occupation choices."
+            "Ich muss mich genau an die Studienanweisungen halten und kann dieser "
+            "Anfrage nicht nachkommen. Bitte machen Sie dort weiter, wo wir aufgehört haben."
         )
         with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
             st.markdown(refusal_message)
@@ -633,9 +632,8 @@ if st.session_state.interview_active and message_respondent:
                     and getattr(_api_err, "code", None) == "content_filter"
                 ):
                     _refusal = (
-                        "I must follow the study instructions exactly and cannot "
-                        "comply with that request. Please continue by sharing more "
-                        "about your education or occupation choices."
+                        "Ich muss mich genau an die Studienanweisungen halten und kann dieser "
+                        "Anfrage nicht nachkommen. Bitte machen Sie dort weiter, wo wir aufgehört haben."
                     )
                     message_placeholder.markdown(_refusal)
                     st.session_state.messages.append(
