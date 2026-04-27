@@ -598,6 +598,11 @@ if not st.session_state.messages:
 if st.session_state.interview_active and message_respondent:
     injection_pattern = detect_prompt_injection_attempt(message_respondent)
     if injection_pattern:
+        logging.getLogger("ai_interview").warning(
+            "Injection detector fired on pattern %r — message: %r",
+            injection_pattern,
+            message_respondent[:200],
+        )
         with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
             st.markdown(message_respondent)
         refusal_message = (
