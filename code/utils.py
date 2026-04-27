@@ -44,19 +44,14 @@ PROMPT_INJECTION_PATTERNS = [
     "ignore previous instructions",
     "disregard previous instructions",
     "forget all prior instructions",
-    "pretend to be",
-    "you are now",
     "begin system prompt",
     "system prompt:",
     "override the system",
     "replace the system instructions",
-    "chain of thought",
     "full chain of thought",
     "show your chain of thought",
     "show your reasoning",
     "full reasoning process",
-    "thinking process",
-    "unaligned",
 ]
 
 
