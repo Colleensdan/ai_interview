@@ -24,6 +24,29 @@ import sharepoint as _sp
 # Load environment variables from .env file
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
+# Timing logger — separate from the main "ai_interview" logger so timing lines
+# can be filtered/grepped independently in Render logs (look for TURN_TIMING).
+TIMING_LOG = logging.getLogger("ai_interview.timing")
+if not TIMING_LOG.handlers:
+    _timing_handler = logging.StreamHandler(sys.stderr)
+    _timing_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    TIMING_LOG.addHandler(_timing_handler)
+    TIMING_LOG.setLevel(logging.INFO)
+
+
+def _emit_turn_timing(**fields):
+    """Emit one structured `TURN_TIMING ...` line with key=value pairs."""
+    parts = ["TURN_TIMING"]
+    for k, v in fields.items():
+        if isinstance(v, float):
+            parts.append(f"{k}={v:.1f}")
+        else:
+            parts.append(f"{k}={v}")
+    TIMING_LOG.info(" ".join(parts))
+
+
 st.set_page_config(page_title="Interview", page_icon="🎓")
 
 import config
@@ -538,31 +561,45 @@ else:
 
 # Generate and display the opening message on first load
 if not st.session_state.messages:
+    _t_open_start = time.perf_counter()
     st.session_state.messages.append(
         {"role": "system", "content": config.SYSTEM_PROMPT_OPENAI}
     )
+    _opening_n_chunks = 0
+    _opening_ttft_ms = -1.0
     with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
         message_placeholder = st.empty()
         message_placeholder.markdown("▌")
         message_interviewer = ""
+        _t_api_request_start = time.perf_counter()
         try:
             stream = client.chat.completions.create(**_prepare_api_kwargs())
         except Exception as _api_err:
             from openai import BadRequestError as _BadRequestError
+            _api_request_ms = (time.perf_counter() - _t_api_request_start) * 1000
             if (
                 isinstance(_api_err, _BadRequestError)
                 and getattr(_api_err, "code", None) == "content_filter"
             ):
+                TIMING_LOG.warning(
+                    "CONTENT_FILTER_TRIP phase=opening user='%s' elapsed_ms=%.1f",
+                    st.session_state.username, _api_request_ms,
+                )
                 message_placeholder.markdown(
                     "I must follow the study instructions exactly and cannot comply with that request."
                 )
                 st.rerun()
             raise
+        _api_request_ms = (time.perf_counter() - _t_api_request_start) * 1000
         for _chunk in stream:
             if _chunk.choices and _chunk.choices[0].delta.content:
+                if _opening_ttft_ms < 0:
+                    _opening_ttft_ms = (time.perf_counter() - _t_api_request_start) * 1000
                 message_interviewer += _chunk.choices[0].delta.content
+                _opening_n_chunks += 1
             if len(message_interviewer) > 5:
                 message_placeholder.markdown(message_interviewer + "▌")
+        _opening_ttlt_ms = (time.perf_counter() - _t_api_request_start) * 1000
         message_placeholder.markdown(message_interviewer)
 
     st.session_state.messages.append(
@@ -570,7 +607,10 @@ if not st.session_state.messages:
     )
     st.session_state.first_message_ready = True
 
-    def _do_initial_backup(username, start_time):
+    _backup_messages = list(st.session_state.messages)
+    _backup_start_time = st.session_state.start_time
+
+    def _do_initial_backup(username, start_time, messages, wall_start_time):
         try:
             save_interview_data(
                 username=username,
@@ -580,42 +620,73 @@ if not st.session_state.messages:
                 file_name_addition_time=f"_time_started_{start_time}",
                 mapping_handler=MAPPING_HANDLER,
                 variant=cfg.variant,
+                messages=messages,
+                start_time=wall_start_time,
             )
         except Exception as _err:
             logging.getLogger("ai_interview").error(
                 "Initial backup failed for user '%s': %s", username, _err
             )
 
+    _t_backup_spawn_start = time.perf_counter()
     threading.Thread(
         target=_do_initial_backup,
-        args=(st.session_state.username, st.session_state.start_time_file_names),
+        args=(st.session_state.username, st.session_state.start_time_file_names,
+              _backup_messages, _backup_start_time),
         daemon=True,
     ).start()
+    _backup_spawn_ms = (time.perf_counter() - _t_backup_spawn_start) * 1000
+    _emit_turn_timing(
+        phase="opening",
+        user=f"'{st.session_state.username}'",
+        api_request_ms=_api_request_ms,
+        ttft_ms=_opening_ttft_ms,
+        ttlt_ms=_opening_ttlt_ms,
+        n_chunks=_opening_n_chunks,
+        out_chars=len(message_interviewer),
+        backup_spawn_ms=_backup_spawn_ms,
+        total_ms=(time.perf_counter() - _t_open_start) * 1000,
+    )
     st.rerun()
 
 # Handle user message
 if st.session_state.interview_active and message_respondent:
+    _t_turn_start = time.perf_counter()
+    _t_pseud_user_start = time.perf_counter()
     _pseudonymized_user_msg = PSEUDONYMIZER.pseudonymize(message_respondent)
+    _pseud_user_ms = (time.perf_counter() - _t_pseud_user_start) * 1000
     st.session_state.messages.append(
         {"role": "user", "content": _pseudonymized_user_msg}
     )
     with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
         st.markdown(_pseudonymized_user_msg)
 
+    _ttft_ms = -1.0
+    _n_chunks = 0
+    _api_request_ms = -1.0
+    _ttlt_ms = -1.0
+    _pseud_assistant_ms = -1.0
+    _backup_spawn_ms = -1.0
     with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
         message_placeholder = st.empty()
         message_interviewer = ""
         tool_call_triggered = None
         _tool_name_buffer = ""
 
+        _t_api_request_start = time.perf_counter()
         try:
             stream = client.chat.completions.create(**_prepare_api_kwargs())
         except Exception as _api_err:
             from openai import BadRequestError as _BadRequestError
+            _api_request_ms = (time.perf_counter() - _t_api_request_start) * 1000
             if (
                 isinstance(_api_err, _BadRequestError)
                 and getattr(_api_err, "code", None) == "content_filter"
             ):
+                TIMING_LOG.warning(
+                    "CONTENT_FILTER_TRIP phase=user user='%s' elapsed_ms=%.1f",
+                    st.session_state.username, _api_request_ms,
+                )
                 _refusal = (
                     "Ich muss mich genau an die Studienanweisungen halten und kann dieser "
                     "Anfrage nicht nachkommen. Bitte machen Sie dort weiter, wo wir aufgehört haben."
@@ -624,14 +695,25 @@ if st.session_state.interview_active and message_respondent:
                 st.session_state.messages.append(
                     {"role": "assistant", "content": _refusal}
                 )
+                _emit_turn_timing(
+                    phase="user_content_filter",
+                    user=f"'{st.session_state.username}'",
+                    pseud_user_ms=_pseud_user_ms,
+                    api_request_ms=_api_request_ms,
+                    total_ms=(time.perf_counter() - _t_turn_start) * 1000,
+                )
                 st.rerun()
             raise
+        _api_request_ms = (time.perf_counter() - _t_api_request_start) * 1000
 
         for _msg in stream:
             if _msg.choices and len(_msg.choices) > 0:
                 delta = _msg.choices[0].delta
                 if delta.content:
+                    if _ttft_ms < 0:
+                        _ttft_ms = (time.perf_counter() - _t_api_request_start) * 1000
                     message_interviewer += delta.content
+                    _n_chunks += 1
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         if tc.function and tc.function.name:
@@ -646,19 +728,25 @@ if st.session_state.interview_active and message_respondent:
             if tool_call_triggered:
                 message_placeholder.empty()
                 break
+        _ttlt_ms = (time.perf_counter() - _t_api_request_start) * 1000
 
         if not tool_call_triggered:
+            _t_pseud_asst_start = time.perf_counter()
             _current_mappings = PSEUDONYMIZER.export_mappings()
             _pseudonymized_assistant_msg = _apply_mappings_to_messages(
                 [{"role": "assistant", "content": message_interviewer}],
                 _current_mappings,
             )[0]["content"]
+            _pseud_assistant_ms = (time.perf_counter() - _t_pseud_asst_start) * 1000
             message_placeholder.markdown(_pseudonymized_assistant_msg)
             st.session_state.messages.append(
                 {"role": "assistant", "content": _pseudonymized_assistant_msg}
             )
 
-            def _do_backup(username, start_time):
+            _turn_messages = list(st.session_state.messages)
+            _turn_start_time = st.session_state.start_time
+
+            def _do_backup(username, start_time, messages, wall_start_time):
                 try:
                     save_interview_data(
                         username=username,
@@ -668,6 +756,8 @@ if st.session_state.interview_active and message_respondent:
                         file_name_addition_time=f"_time_started_{start_time}",
                         mapping_handler=MAPPING_HANDLER,
                         variant=cfg.variant,
+                        messages=messages,
+                        start_time=wall_start_time,
                     )
                 except Exception as _backup_err:
                     logging.getLogger("ai_interview").error(
@@ -675,11 +765,29 @@ if st.session_state.interview_active and message_respondent:
                         username, _backup_err,
                     )
 
+            _t_backup_spawn_start = time.perf_counter()
             threading.Thread(
                 target=_do_backup,
-                args=(st.session_state.username, st.session_state.start_time_file_names),
+                args=(st.session_state.username, st.session_state.start_time_file_names,
+                      _turn_messages, _turn_start_time),
                 daemon=True,
             ).start()
+            _backup_spawn_ms = (time.perf_counter() - _t_backup_spawn_start) * 1000
+
+    _emit_turn_timing(
+        phase="user",
+        user=f"'{st.session_state.username}'",
+        pseud_user_ms=_pseud_user_ms,
+        api_request_ms=_api_request_ms,
+        ttft_ms=_ttft_ms,
+        ttlt_ms=_ttlt_ms,
+        n_chunks=_n_chunks,
+        out_chars=len(message_interviewer),
+        pseud_assistant_ms=_pseud_assistant_ms,
+        backup_spawn_ms=_backup_spawn_ms,
+        total_ms=(time.perf_counter() - _t_turn_start) * 1000,
+        tool_triggered=(tool_call_triggered or "none"),
+    )
 
     if tool_call_triggered:
         closing_message = config.TOOL_CLOSING_MESSAGES[tool_call_triggered]

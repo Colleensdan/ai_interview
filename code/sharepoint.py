@@ -24,6 +24,18 @@ if not logger.handlers:
     logger.addHandler(_handler)
     logger.setLevel(logging.INFO)
 
+# Timing logger — same name used in interview.py so SP_TIMING and TURN_TIMING
+# appear in the same stream. Configured separately in case sharepoint is
+# imported standalone (e.g. from bench scripts) before interview.py runs.
+timing_logger = logging.getLogger("ai_interview.timing")
+if not timing_logger.handlers:
+    _t_handler = logging.StreamHandler(sys.stderr)
+    _t_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    timing_logger.addHandler(_t_handler)
+    timing_logger.setLevel(logging.INFO)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -49,12 +61,14 @@ def _get_token() -> str:
     """Return a valid app-only access token, refreshing when near expiry."""
     now = time.time()
     if _token_cache["token"] and now < _token_cache["expires_at"]:
+        timing_logger.info("SP_TIMING op=token elapsed_ms=0.0 cached=true")
         return _token_cache["token"]
 
     tenant_id = _must_env("TENANT_ID")
     client_id = _must_env("CLIENT_ID")
     client_secret = _must_env("CLIENT_SECRET")
 
+    _t = time.perf_counter()
     r = requests.post(
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
         data={
@@ -65,19 +79,28 @@ def _get_token() -> str:
         },
         timeout=30,
     )
+    _elapsed_ms = (time.perf_counter() - _t) * 1000
     if r.status_code != 200:
         _token_cache["token"] = None  # invalidate on failure
+        timing_logger.warning(
+            "SP_TIMING op=token elapsed_ms=%.1f cached=false status=fail http=%d",
+            _elapsed_ms, r.status_code,
+        )
         raise RuntimeError(f"Token request failed ({r.status_code}): {r.text}")
 
     payload = r.json()
     _token_cache["token"] = payload["access_token"]
     _token_cache["expires_at"] = now + payload.get("expires_in", 3600) - 60
+    timing_logger.info(
+        "SP_TIMING op=token elapsed_ms=%.1f cached=false status=ok", _elapsed_ms,
+    )
     return _token_cache["token"]
 
 
 def _get_drive_id(token: str) -> str:
     """Resolve and cache the SharePoint drive ID for the configured library."""
     if _drive_id_cache["drive_id"]:
+        timing_logger.info("SP_TIMING op=drive_id elapsed_ms=0.0 cached=true")
         return _drive_id_cache["drive_id"]
 
     sp_hostname = _must_env("SP_HOSTNAME")
@@ -86,6 +109,7 @@ def _get_drive_id(token: str) -> str:
 
     headers = {"Authorization": f"Bearer {token}"}
 
+    _t = time.perf_counter()
     r = requests.get(
         f"{GRAPH_ROOT}/sites/{sp_hostname}:{sp_site_path}",
         headers=headers,
@@ -112,6 +136,10 @@ def _get_drive_id(token: str) -> str:
         )
 
     _drive_id_cache["drive_id"] = drive_id
+    timing_logger.info(
+        "SP_TIMING op=drive_id elapsed_ms=%.1f cached=false status=ok",
+        (time.perf_counter() - _t) * 1000,
+    )
     return drive_id
 
 
@@ -144,6 +172,7 @@ def upload_bytes(filename: str, content: bytes, subfolder: str = "", _retries: i
     """
     last_exc: Exception | None = None
     for attempt in range(1, _retries + 1):
+        _t_attempt = time.perf_counter()
         try:
             # Always fetch a (possibly cached) token; it self-refreshes on expiry.
             token = _get_token()
@@ -152,6 +181,7 @@ def upload_bytes(filename: str, content: bytes, subfolder: str = "", _retries: i
 
             sp_path = f"{folder_path}/{subfolder}/{filename}" if subfolder else f"{folder_path}/{filename}"
             upload_url = f"{GRAPH_ROOT}/drives/{drive_id}/root:/{sp_path}:/content"
+            _t_put = time.perf_counter()
             r = requests.put(
                 upload_url,
                 headers={
@@ -161,6 +191,7 @@ def upload_bytes(filename: str, content: bytes, subfolder: str = "", _retries: i
                 data=content,
                 timeout=60,
             )
+            _put_ms = (time.perf_counter() - _t_put) * 1000
             if r.status_code >= 400:
                 # 401 means the cached token may be stale — clear it so the
                 # next attempt re-authenticates.
@@ -170,11 +201,23 @@ def upload_bytes(filename: str, content: bytes, subfolder: str = "", _retries: i
                     f"Upload of '{filename}' failed ({r.status_code}): {r.text}"
                 )
 
+            timing_logger.info(
+                "SP_TIMING op=upload elapsed_ms=%.1f put_ms=%.1f attempt=%d/%d "
+                "status=ok bytes=%d folder='%s' filename='%s'",
+                (time.perf_counter() - _t_attempt) * 1000, _put_ms, attempt, _retries,
+                len(content), subfolder or ".", filename,
+            )
             logger.info("SharePoint upload OK: %s/%s (attempt %d)", subfolder or ".", filename, attempt)
             return
 
         except Exception as exc:
             last_exc = exc
+            timing_logger.warning(
+                "SP_TIMING op=upload elapsed_ms=%.1f attempt=%d/%d status=retry "
+                "bytes=%d folder='%s' filename='%s' err='%s'",
+                (time.perf_counter() - _t_attempt) * 1000, attempt, _retries,
+                len(content), subfolder or ".", filename, str(exc)[:120],
+            )
             logger.warning(
                 "SharePoint upload attempt %d/%d failed for '%s': %s",
                 attempt, _retries, filename, exc,
@@ -182,6 +225,10 @@ def upload_bytes(filename: str, content: bytes, subfolder: str = "", _retries: i
             if attempt < _retries:
                 time.sleep(2 ** (attempt - 1))  # 1 s, 2 s before attempts 2, 3
 
+    timing_logger.error(
+        "SP_TIMING op=upload status=fail attempts=%d filename='%s' folder='%s' err='%s'",
+        _retries, filename, subfolder or ".", str(last_exc)[:120],
+    )
     logger.error(
         "SharePoint upload FAILED after %d attempts for '%s': %s",
         _retries, filename, last_exc,
