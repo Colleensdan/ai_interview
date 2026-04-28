@@ -40,21 +40,6 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 
-PROMPT_INJECTION_PATTERNS = [
-    "ignore previous instructions",
-    "disregard previous instructions",
-    "forget all prior instructions",
-    "begin system prompt",
-    "system prompt:",
-    "override the system",
-    "replace the system instructions",
-    "full chain of thought",
-    "show your chain of thought",
-    "show your reasoning",
-    "full reasoning process",
-]
-
-
 # Password screen for dashboard (note: only very basic authentication!)
 # Based on https://docs.streamlit.io/knowledge-base/deploy/authentication-without-sso
 def check_password():
@@ -185,11 +170,3 @@ def save_interview_data(
     return mappings
 
 
-def detect_prompt_injection_attempt(message):
-    """Return the matched pattern if message looks like a prompt-injection attempt."""
-
-    lowered = message.lower()
-    for pattern in PROMPT_INJECTION_PATTERNS:
-        if pattern in lowered:
-            return pattern
-    return None

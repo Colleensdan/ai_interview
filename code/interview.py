@@ -11,7 +11,6 @@ from utils import (
     check_password,
     check_if_interview_completed,
     save_interview_data,
-    detect_prompt_injection_attempt,
     PSEUDONYMIZER,
 )
 from pseudonymizer import _apply_mappings_to_messages
@@ -596,137 +595,118 @@ if not st.session_state.messages:
 
 # Handle user message
 if st.session_state.interview_active and message_respondent:
-    injection_pattern = detect_prompt_injection_attempt(message_respondent)
-    if injection_pattern:
-        logging.getLogger("ai_interview").warning(
-            "Injection detector fired on pattern %r — message: %r",
-            injection_pattern,
-            message_respondent[:200],
-        )
-        with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
-            st.markdown(message_respondent)
-        refusal_message = (
-            "Ich muss mich genau an die Studienanweisungen halten und kann dieser "
-            "Anfrage nicht nachkommen. Bitte machen Sie dort weiter, wo wir aufgehört haben."
-        )
-        with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
-            st.markdown(refusal_message)
-        st.session_state.messages.append(
-            {"role": "assistant", "content": refusal_message}
-        )
-    else:
-        _pseudonymized_user_msg = PSEUDONYMIZER.pseudonymize(message_respondent)
-        st.session_state.messages.append(
-            {"role": "user", "content": _pseudonymized_user_msg}
-        )
-        with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
-            st.markdown(_pseudonymized_user_msg)
+    _pseudonymized_user_msg = PSEUDONYMIZER.pseudonymize(message_respondent)
+    st.session_state.messages.append(
+        {"role": "user", "content": _pseudonymized_user_msg}
+    )
+    with st.chat_message("user", avatar=config.AVATAR_RESPONDENT):
+        st.markdown(_pseudonymized_user_msg)
 
-        with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
-            message_placeholder = st.empty()
-            message_interviewer = ""
-            tool_call_triggered = None
-            _tool_name_buffer = ""
+    with st.chat_message("assistant", avatar=config.AVATAR_INTERVIEWER):
+        message_placeholder = st.empty()
+        message_interviewer = ""
+        tool_call_triggered = None
+        _tool_name_buffer = ""
 
-            try:
-                stream = client.chat.completions.create(**_prepare_api_kwargs())
-            except Exception as _api_err:
-                from openai import BadRequestError as _BadRequestError
-                if (
-                    isinstance(_api_err, _BadRequestError)
-                    and getattr(_api_err, "code", None) == "content_filter"
-                ):
-                    _refusal = (
-                        "Ich muss mich genau an die Studienanweisungen halten und kann dieser "
-                        "Anfrage nicht nachkommen. Bitte machen Sie dort weiter, wo wir aufgehört haben."
-                    )
-                    message_placeholder.markdown(_refusal)
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": _refusal}
-                    )
-                    st.rerun()
-                raise
-
-            for _msg in stream:
-                if _msg.choices and len(_msg.choices) > 0:
-                    delta = _msg.choices[0].delta
-                    if delta.content:
-                        message_interviewer += delta.content
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            if tc.function and tc.function.name:
-                                _tool_name_buffer += tc.function.name
-                    if tool_call_triggered is None:
-                        for fn_name in config.TOOL_CLOSING_MESSAGES:
-                            if fn_name in _tool_name_buffer:
-                                tool_call_triggered = fn_name
-                                break
-                if len(message_interviewer) > 5:
-                    message_placeholder.markdown(message_interviewer + "▌")
-                if tool_call_triggered:
-                    message_placeholder.empty()
-                    break
-
-            if not tool_call_triggered:
-                _current_mappings = PSEUDONYMIZER.export_mappings()
-                _pseudonymized_assistant_msg = _apply_mappings_to_messages(
-                    [{"role": "assistant", "content": message_interviewer}],
-                    _current_mappings,
-                )[0]["content"]
-                message_placeholder.markdown(_pseudonymized_assistant_msg)
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": _pseudonymized_assistant_msg}
+        try:
+            stream = client.chat.completions.create(**_prepare_api_kwargs())
+        except Exception as _api_err:
+            from openai import BadRequestError as _BadRequestError
+            if (
+                isinstance(_api_err, _BadRequestError)
+                and getattr(_api_err, "code", None) == "content_filter"
+            ):
+                _refusal = (
+                    "Ich muss mich genau an die Studienanweisungen halten und kann dieser "
+                    "Anfrage nicht nachkommen. Bitte machen Sie dort weiter, wo wir aufgehört haben."
                 )
+                message_placeholder.markdown(_refusal)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": _refusal}
+                )
+                st.rerun()
+            raise
 
-                def _do_backup(username, start_time):
-                    try:
-                        save_interview_data(
-                            username=username,
-                            transcripts_directory=config.BACKUPS_DIRECTORY,
-                            times_directory=config.BACKUPS_DIRECTORY,
-                            file_name_addition_transcript=f"_transcript_started_{start_time}",
-                            file_name_addition_time=f"_time_started_{start_time}",
-                            mapping_handler=MAPPING_HANDLER,
-                            variant=cfg.variant,
-                        )
-                    except Exception as _backup_err:
-                        logging.getLogger("ai_interview").error(
-                            "Backup save failed for user '%s': %s",
-                            username, _backup_err,
-                        )
+        for _msg in stream:
+            if _msg.choices and len(_msg.choices) > 0:
+                delta = _msg.choices[0].delta
+                if delta.content:
+                    message_interviewer += delta.content
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        if tc.function and tc.function.name:
+                            _tool_name_buffer += tc.function.name
+                if tool_call_triggered is None:
+                    for fn_name in config.TOOL_CLOSING_MESSAGES:
+                        if fn_name in _tool_name_buffer:
+                            tool_call_triggered = fn_name
+                            break
+            if len(message_interviewer) > 5:
+                message_placeholder.markdown(message_interviewer + "▌")
+            if tool_call_triggered:
+                message_placeholder.empty()
+                break
 
-                threading.Thread(
-                    target=_do_backup,
-                    args=(st.session_state.username, st.session_state.start_time_file_names),
-                    daemon=True,
-                ).start()
-
-        if tool_call_triggered:
-            closing_message = config.TOOL_CLOSING_MESSAGES[tool_call_triggered]
+        if not tool_call_triggered:
             _current_mappings = PSEUDONYMIZER.export_mappings()
-            _pseudonymized_closing_msg = _apply_mappings_to_messages(
+            _pseudonymized_assistant_msg = _apply_mappings_to_messages(
                 [{"role": "assistant", "content": message_interviewer}],
                 _current_mappings,
             )[0]["content"]
+            message_placeholder.markdown(_pseudonymized_assistant_msg)
             st.session_state.messages.append(
-                {"role": "assistant", "content": _pseudonymized_closing_msg}
-            )
-            st.session_state.interview_active = False
-            st.markdown(closing_message)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": closing_message}
+                {"role": "assistant", "content": _pseudonymized_assistant_msg}
             )
 
-            final_transcript_stored = False
-            while not final_transcript_stored:
-                save_interview_data(
-                    username=st.session_state.username,
-                    transcripts_directory=config.TRANSCRIPTS_DIRECTORY,
-                    times_directory=config.TIMES_DIRECTORY,
-                    mapping_handler=MAPPING_HANDLER,
-                    variant=cfg.variant,
-                )
-                final_transcript_stored = check_if_interview_completed(
-                    config.TRANSCRIPTS_DIRECTORY, st.session_state.username
-                )
-                time.sleep(0.1)
+            def _do_backup(username, start_time):
+                try:
+                    save_interview_data(
+                        username=username,
+                        transcripts_directory=config.BACKUPS_DIRECTORY,
+                        times_directory=config.BACKUPS_DIRECTORY,
+                        file_name_addition_transcript=f"_transcript_started_{start_time}",
+                        file_name_addition_time=f"_time_started_{start_time}",
+                        mapping_handler=MAPPING_HANDLER,
+                        variant=cfg.variant,
+                    )
+                except Exception as _backup_err:
+                    logging.getLogger("ai_interview").error(
+                        "Backup save failed for user '%s': %s",
+                        username, _backup_err,
+                    )
+
+            threading.Thread(
+                target=_do_backup,
+                args=(st.session_state.username, st.session_state.start_time_file_names),
+                daemon=True,
+            ).start()
+
+    if tool_call_triggered:
+        closing_message = config.TOOL_CLOSING_MESSAGES[tool_call_triggered]
+        _current_mappings = PSEUDONYMIZER.export_mappings()
+        _pseudonymized_closing_msg = _apply_mappings_to_messages(
+            [{"role": "assistant", "content": message_interviewer}],
+            _current_mappings,
+        )[0]["content"]
+        st.session_state.messages.append(
+            {"role": "assistant", "content": _pseudonymized_closing_msg}
+        )
+        st.session_state.interview_active = False
+        st.markdown(closing_message)
+        st.session_state.messages.append(
+            {"role": "assistant", "content": closing_message}
+        )
+
+        final_transcript_stored = False
+        while not final_transcript_stored:
+            save_interview_data(
+                username=st.session_state.username,
+                transcripts_directory=config.TRANSCRIPTS_DIRECTORY,
+                times_directory=config.TIMES_DIRECTORY,
+                mapping_handler=MAPPING_HANDLER,
+                variant=cfg.variant,
+            )
+            final_transcript_stored = check_if_interview_completed(
+                config.TRANSCRIPTS_DIRECTORY, st.session_state.username
+            )
+            time.sleep(0.1)
