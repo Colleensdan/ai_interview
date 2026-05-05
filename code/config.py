@@ -68,7 +68,7 @@ except Exception as e:
 #INTERVIEW PROMPTS
 if cfg.variant == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
-elif cfg.variant == "combustion_engine":
+elif cfg.variant == "combustion":
     INTERVIEW_OUTLINE = prompts_dir / "combustion_engine.txt"
 else:
     raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
@@ -79,7 +79,7 @@ else:
 if INTERVIEW_PROMPT == "deforestation":
     INTERVIEW_OUTLINE = prompts_dir / "deforestation.txt"
 
-elif INTERVIEW_PROMPT == "combustion_engine":
+elif INTERVIEW_PROMPT == "combustion":
     INTERVIEW_OUTLINE = prompts_dir / "combustion_engine.txt"
 
 else:
