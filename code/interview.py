@@ -356,7 +356,7 @@ def _disable_paste_on_chat_input():
           }}
           const attachListener = () => {{
             const textarea = parentWindow.document.querySelector(
-              'textarea:not([data-paste-guarded])'
+              'textarea[data-testid="stChatInputTextArea"]'
             );
             if (!textarea || textarea.dataset.pasteDisabled === "true") {{
               return;
