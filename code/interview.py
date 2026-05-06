@@ -1,4 +1,4 @@
-st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
+
 
 import argparse
 import json
@@ -7,6 +7,9 @@ import re
 import sys
 import threading
 import streamlit as st
+
+st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
+
 import streamlit.components.v1 as components
 import time
 from utils import (
