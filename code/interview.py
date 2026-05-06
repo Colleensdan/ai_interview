@@ -51,7 +51,6 @@ def _emit_turn_timing(**fields):
 
 st.set_page_config(page_title="Interview", page_icon="🎓")
 
-st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
 
 import config
 from config import load_config, prompts_dir
@@ -65,7 +64,6 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-st.write("CONFIG VARIANT USED:", cfg.variant)
 
 st.markdown(
     "<style>[data-testid='stSidebar']{display:none;}</style>",
