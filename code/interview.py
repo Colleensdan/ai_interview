@@ -1,3 +1,5 @@
+st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
+
 import argparse
 import json
 import logging
