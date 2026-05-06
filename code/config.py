@@ -21,7 +21,7 @@ def _as_bool(v, default: bool) -> bool:
 
 def load_config() -> AppConfig:
     # Variant chosen by URL (nondescript token)
-    token = st.query_params.get("q")
+    token = st.query_params.get("interview_version")
     if token is None:
         variant = "combustion"
     else:
