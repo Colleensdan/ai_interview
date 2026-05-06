@@ -7,9 +7,6 @@ import re
 import sys
 import threading
 import streamlit as st
-
-st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
-
 import streamlit.components.v1 as components
 import time
 from utils import (
@@ -53,6 +50,8 @@ def _emit_turn_timing(**fields):
 
 
 st.set_page_config(page_title="Interview", page_icon="🎓")
+
+st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
 
 import config
 from config import load_config, prompts_dir
