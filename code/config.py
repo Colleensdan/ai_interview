@@ -150,30 +150,10 @@ TOOL_CLOSING_MESSAGES = {
     "flag_problematic_content": CLOSING_MESSAGES["5j3k"],
 }
 
-cfg = load_config()
-
-if cfg.variant == "deforestation":
-    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
-elif cfg.variant == "combustion":
-    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
-else:
-    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
 
 
-# System prompt
-SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
 
 
-{GENERAL_INSTRUCTIONS}
-
-
-{CODES}"""
-
-# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
-SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
-
-
-{GENERAL_INSTRUCTIONS}"""
 
 
 # API parameters
