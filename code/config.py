@@ -3,7 +3,7 @@ from pathlib import Path
 import streamlit as st
 from dataclasses import dataclass
 
-
+"""
 VARIANT_TOKENS = {
     "T5wp7": "combustion",
     "D9k2m": "deforestation",
@@ -31,7 +31,7 @@ def load_config() -> AppConfig:
         raise ValueError(
             f"Invalid variant token '{token}'."
         )
-
+"""
     """
     variants = st.secrets.get("variants")
     if not variants or variant not in variants:

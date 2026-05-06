@@ -65,6 +65,46 @@ except Exception as e:
     st.stop()
 
 
+
+
+
+VARIANT_TOKENS = {
+    "T5wp7": "combustion",
+    "D9k2m": "deforestation",
+}
+ALLOWED_VARIANTS = set(VARIANT_TOKENS.values())
+
+@dataclass(frozen=True)
+class AppConfig:
+    variant: str
+
+def _as_bool(v, default: bool) -> bool:
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def load_config() -> AppConfig:
+    # Variant chosen by URL (nondescript token)
+    token = st.query_params.get("interview_version")
+    if token is None:
+        variant = "combustion"
+    else:
+        variant = VARIANT_TOKENS.get(token)
+
+    if variant not in ALLOWED_VARIANTS:
+        raise ValueError(
+            f"Invalid variant token '{token}'."
+        )
+
+
+
+
+
+
+
+
+
+
 st.markdown(
     "<style>[data-testid='stSidebar']{display:none;}</style>",
     unsafe_allow_html=True,
