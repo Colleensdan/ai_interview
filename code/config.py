@@ -20,13 +20,17 @@ def _as_bool(v, default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 def load_config() -> AppConfig:
+    # Variant chosen by URL (nondescript token)
     token = st.query_params.get("q")
-    variant = VARIANT_TOKENS.get(token)
+    if token is None:
+        variant = "deforestation"
+    else:
+        variant = VARIANT_TOKENS.get(token)
 
-    if token is None or variant not in ALLOWED_VARIANTS:
-        raise ValueError(f"Invalid or missing variant token '{token}'.")
-
-    return AppConfig(variant=variant)
+    if variant not in ALLOWED_VARIANTS:
+        raise ValueError(
+            f"Invalid variant token '{token}'."
+        )
 
     """
     variants = st.secrets.get("variants")
