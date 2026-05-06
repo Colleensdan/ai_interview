@@ -68,6 +68,39 @@ except Exception as e:
 
 
 
+cfg = load_config()
+
+
+if cfg.variant == "deforestation":
+    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
+elif cfg.variant == "combustion":
+    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
+else:
+    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+
+# Build system prompts here (runtime, variant-safe)
+SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
+
+{config.GENERAL_INSTRUCTIONS}
+
+{config.CODES}
+"""
+
+SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
+
+{config.GENERAL_INSTRUCTIONS}
+"""
+
+
+
+
+
+
+
+
+
+
+
 VARIANT_TOKENS = {
     "T5wp7": "combustion",
     "D9k2m": "deforestation",
