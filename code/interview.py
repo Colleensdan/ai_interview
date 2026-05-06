@@ -54,6 +54,8 @@ st.set_page_config(page_title="Interview", page_icon="🎓")
 st.write("QUERY PARAMS AT FIRST LOAD:", dict(st.query_params))
 
 import config
+
+st.write("CONFIG VARIANT USED:", cfg.variant)
 from config import load_config, prompts_dir
 
 
