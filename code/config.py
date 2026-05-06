@@ -23,7 +23,7 @@ def load_config() -> AppConfig:
     # Variant chosen by URL (nondescript token)
     token = st.query_params.get("q")
     if token is None:
-        variant = "deforestation"
+        variant = "combustion"
     else:
         variant = VARIANT_TOKENS.get(token)
 
