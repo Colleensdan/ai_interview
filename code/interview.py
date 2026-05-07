@@ -53,7 +53,7 @@ st.set_page_config(page_title="Interview", page_icon="🎓")
 
 
 import config
-from config import load_config, prompts_dir
+from config import load_config, prompts_dir, build_system_prompts
 
 
 
@@ -64,9 +64,7 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-
-
-cfg = load_config()
+SYSTEM_PROMPT, SYSTEM_PROMPT_OPENAI = build_system_prompts(cfg.variant)
 
 
 
@@ -303,7 +301,7 @@ def _build_messages_for_api(include_system):
     messages = []
     if include_system:
         system_prompt = (
-            config.SYSTEM_PROMPT_OPENAI if api == "openai" else config.SYSTEM_PROMPT
+            SYSTEM_PROMPT_OPENAI if api == "openai" else SYSTEM_PROMPT
         )
         messages.append({"role": "system", "content": system_prompt})
 
@@ -313,7 +311,7 @@ def _build_messages_for_api(include_system):
         messages.append(_sanitize_message_for_api(message))
 
     if include_system and not messages:
-        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        messages.append({"role": "system", "content": SYSTEM_PROMPT_OPENAI})
 
     return messages
 
@@ -334,7 +332,7 @@ def _prepare_api_kwargs():
         kwargs["messages"] = _build_messages_for_api(include_system=True)
         kwargs["tools"] = config.TERMINATION_TOOLS
     else:
-        kwargs["system"] = config.SYSTEM_PROMPT
+        kwargs["system"] = SYSTEM_PROMPT
         kwargs["messages"] = _build_messages_for_api(include_system=False)
 
     return kwargs
@@ -353,6 +351,7 @@ def _disable_paste_on_chat_input():
     nonce = st.session_state.get("start_time", 0)
     components.html(
         f"""
+        <!-- nonce:{nonce} -->
         <script>
         (function() {{
           const parentWindow = window.parent;
@@ -571,7 +570,7 @@ else:
 if not st.session_state.messages:
     _t_open_start = time.perf_counter()
     st.session_state.messages.append(
-        {"role": "system", "content": config.SYSTEM_PROMPT_OPENAI}
+        {"role": "system", "content": SYSTEM_PROMPT_OPENAI}
     )
     _opening_n_chunks = 0
     _opening_ttft_ms = -1.0

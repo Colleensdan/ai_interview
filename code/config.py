@@ -152,30 +152,22 @@ TOOL_CLOSING_MESSAGES = {
 
 
 
-cfg = load_config()
+def build_system_prompts(variant: str) -> tuple:
+    """Return (SYSTEM_PROMPT, SYSTEM_PROMPT_OPENAI) for the given variant.
 
-if cfg.variant == "deforestation":
-    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
-elif cfg.variant == "combustion":
-    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
-else:
-    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
+    Called per-session from interview.py so the correct prompt is always used
+    regardless of which variant URL the participant arrived on.
+    """
+    if variant == "deforestation":
+        outline = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
+    elif variant == "combustion":
+        outline = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
+    else:
+        raise ValueError(f"Unknown variant: {variant!r}")
 
-
-# System prompt
-SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
-
-
-{GENERAL_INSTRUCTIONS}
-
-
-{CODES}"""
-
-# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
-SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
-
-
-{GENERAL_INSTRUCTIONS}"""
+    system_prompt = f"{outline}\n\n\n{GENERAL_INSTRUCTIONS}\n\n\n{CODES}"
+    system_prompt_openai = f"{outline}\n\n\n{GENERAL_INSTRUCTIONS}"
+    return system_prompt, system_prompt_openai
 
 
 
