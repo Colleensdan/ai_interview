@@ -348,11 +348,10 @@ def _prepare_api_kwargs():
 def _disable_paste_on_chat_input():
     """Prevent pasting into the Streamlit chat input textarea.
 
-    The session start time is embedded as a nonce so that Streamlit/React
-    creates a fresh iframe (and re-executes the script) whenever a new session
-    begins — e.g. after a server restart or reconnect — while still reusing the
-    cached iframe across reruns within the same session.  This prevents a stale
-    MutationObserver from a previous session leaving the textarea unprotected.
+    Uses a document-level capture-phase listener so paste is blocked regardless
+    of whether React remounts the textarea element between reruns (e.g. when the
+    disabled prop toggles). The nonce ensures the iframe is recreated each session
+    so stale guards from previous sessions are replaced.
     """
 
     nonce = st.session_state.get("start_time", 0)
@@ -361,37 +360,18 @@ def _disable_paste_on_chat_input():
         <!-- nonce:{nonce} -->
         <script>
         (function() {{
-          const parentWindow = window.parent;
-          // Disconnect any stale observer from a previous session before
-          // re-establishing, so a reconnect never leaves the textarea unprotected.
-          if (parentWindow.__disableChatPasteObserver) {{
-            parentWindow.__disableChatPasteObserver.disconnect();
-            delete parentWindow.__disableChatPasteObserver;
+          const doc = window.parent.document;
+          // Remove any guard registered by a previous session.
+          if (window.parent.__chatPasteGuard) {{
+            doc.removeEventListener('paste', window.parent.__chatPasteGuard, true);
           }}
-          const attachListener = () => {{
-            const textarea = parentWindow.document.querySelector(
-              'textarea[data-testid="stChatInputTextArea"]'
-            );
-            if (!textarea || textarea.dataset.pasteDisabled === "true") {{
-              return;
-            }}
-            textarea.dataset.pasteDisabled = "true";
-            textarea.addEventListener("paste", (event) => {{
+          window.parent.__chatPasteGuard = function(event) {{
+            if (event.target && event.target.matches(
+                'textarea[data-testid="stChatInputTextArea"]')) {{
               event.preventDefault();
-            }});
+            }}
           }};
-          attachListener();
-          const observer = new MutationObserver(attachListener);
-          observer.observe(parentWindow.document.body, {{ childList: true, subtree: true }});
-          parentWindow.__disableChatPasteObserver = observer;
-          // Polling fallback: covers React portal timing races where the textarea
-          // may be inserted into a pre-existing container the observer misses.
-          if (parentWindow.__disableChatPastePoll) clearInterval(parentWindow.__disableChatPastePoll);
-          let _attempts = 0;
-          parentWindow.__disableChatPastePoll = setInterval(() => {{
-            attachListener();
-            if (++_attempts >= 40) clearInterval(parentWindow.__disableChatPastePoll);
-          }}, 250);
+          doc.addEventListener('paste', window.parent.__chatPasteGuard, true);
         }})();
         </script>
         """,
