@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 import streamlit as st
 from dataclasses import dataclass
 
@@ -12,7 +13,7 @@ ALLOWED_VARIANTS = set(VARIANT_TOKENS.values())
 
 @dataclass(frozen=True)
 class AppConfig:
-    variant: str
+    variant: Optional[str]
 
 def _as_bool(v, default: bool) -> bool:
     if v is None:
@@ -23,25 +24,13 @@ def load_config() -> AppConfig:
     # Variant chosen by URL (nondescript token)
     token = st.query_params.get("interview_version")
     if token is None:
-        variant = "combustion"
-    else:
-        variant = VARIANT_TOKENS.get(token)
+        return AppConfig(variant=None)
 
+    variant = VARIANT_TOKENS.get(token)
     if variant not in ALLOWED_VARIANTS:
         raise ValueError(
             f"Invalid variant token '{token}'."
         )
-
-    """
-    variants = st.secrets.get("variants")
-    if not variants or variant not in variants:
-        raise RuntimeError(
-            f"Missing secrets for variant '{variant}'"
-        )
-
-
-    vcfg = variants[variant]
-    """
 
     return AppConfig(
         variant=variant
