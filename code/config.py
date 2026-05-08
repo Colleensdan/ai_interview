@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 import streamlit as st
 from dataclasses import dataclass
 
@@ -12,7 +13,7 @@ ALLOWED_VARIANTS = set(VARIANT_TOKENS.values())
 
 @dataclass(frozen=True)
 class AppConfig:
-    variant: str
+    variant: Optional[str]
 
 def _as_bool(v, default: bool) -> bool:
     if v is None:
@@ -20,28 +21,15 @@ def _as_bool(v, default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 def load_config() -> AppConfig:
-    # Variant chosen by URL (nondescript token)
     token = st.query_params.get("q")
     if token is None:
-        variant = "deforestation"
-    else:
-        variant = VARIANT_TOKENS.get(token)
+        return AppConfig(variant=None)
 
+    variant = VARIANT_TOKENS.get(token)
     if variant not in ALLOWED_VARIANTS:
         raise ValueError(
             f"Invalid variant token '{token}'."
         )
-
-    """
-    variants = st.secrets.get("variants")
-    if not variants or variant not in variants:
-        raise RuntimeError(
-            f"Missing secrets for variant '{variant}'"
-        )
-
-
-    vcfg = variants[variant]
-    """
 
     return AppConfig(
         variant=variant
@@ -157,30 +145,18 @@ TOOL_CLOSING_MESSAGES = {
     "flag_problematic_content": CLOSING_MESSAGES["5j3k"],
 }
 
-cfg = load_config()
+def build_system_prompts(variant: str) -> tuple:
+    """Return (SYSTEM_PROMPT, SYSTEM_PROMPT_OPENAI) for the given variant."""
+    if variant == "deforestation":
+        outline = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
+    elif variant == "combustion":
+        outline = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
+    else:
+        raise ValueError(f"Unknown variant: {variant!r}")
 
-if cfg.variant == "deforestation":
-    INTERVIEW_OUTLINE = (prompts_dir / "deforestation.txt").read_text(encoding="utf-8")
-elif cfg.variant == "combustion":
-    INTERVIEW_OUTLINE = (prompts_dir / "combustion_engine.txt").read_text(encoding="utf-8")
-else:
-    raise ValueError(f"Unknown INTERVIEW_PROMPT: {cfg.variant}")
-
-
-# System prompt
-SYSTEM_PROMPT = f"""{INTERVIEW_OUTLINE}
-
-
-{GENERAL_INSTRUCTIONS}
-
-
-{CODES}"""
-
-# System prompt for OpenAI/Azure — omits CODES because tool calling handles termination
-SYSTEM_PROMPT_OPENAI = f"""{INTERVIEW_OUTLINE}
-
-
-{GENERAL_INSTRUCTIONS}"""
+    system_prompt = f"{outline}\n\n\n{GENERAL_INSTRUCTIONS}\n\n\n{CODES}"
+    system_prompt_openai = f"{outline}\n\n\n{GENERAL_INSTRUCTIONS}"
+    return system_prompt, system_prompt_openai
 
 
 # API parameters
