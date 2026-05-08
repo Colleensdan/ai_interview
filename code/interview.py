@@ -50,7 +50,7 @@ def _emit_turn_timing(**fields):
 st.set_page_config(page_title="Interview", page_icon="🎓")
 
 import config
-from config import load_config, prompts_dir
+from config import load_config, prompts_dir, build_system_prompts
 
 
 
@@ -60,6 +60,15 @@ except Exception as e:
     st.error("Configuration error")
     st.code(str(e))
     st.stop()
+
+if cfg.variant is None:
+    st.markdown(
+        "Du er landet på den forkerte hjemmeside. Dette er en fejl. "
+        "Luk venligst denne side og rapporter problemet i undersøgelsen."
+    )
+    st.stop()
+
+SYSTEM_PROMPT, SYSTEM_PROMPT_OPENAI = build_system_prompts(cfg.variant)
 
 
 st.markdown(
@@ -295,7 +304,7 @@ def _build_messages_for_api(include_system):
     messages = []
     if include_system:
         system_prompt = (
-            config.SYSTEM_PROMPT_OPENAI if api == "openai" else config.SYSTEM_PROMPT
+            SYSTEM_PROMPT_OPENAI if api == "openai" else SYSTEM_PROMPT
         )
         messages.append({"role": "system", "content": system_prompt})
 
@@ -326,7 +335,7 @@ def _prepare_api_kwargs():
         kwargs["messages"] = _build_messages_for_api(include_system=True)
         kwargs["tools"] = config.TERMINATION_TOOLS
     else:
-        kwargs["system"] = config.SYSTEM_PROMPT
+        kwargs["system"] = SYSTEM_PROMPT
         kwargs["messages"] = _build_messages_for_api(include_system=False)
 
     return kwargs
@@ -345,6 +354,7 @@ def _disable_paste_on_chat_input():
     nonce = st.session_state.get("start_time", 0)
     components.html(
         f"""
+        <!-- nonce:{nonce} -->
         <script>
         (function() {{
           const parentWindow = window.parent;
@@ -370,6 +380,14 @@ def _disable_paste_on_chat_input():
           const observer = new MutationObserver(attachListener);
           observer.observe(parentWindow.document.body, {{ childList: true, subtree: true }});
           parentWindow.__disableChatPasteObserver = observer;
+          // Polling fallback: covers React portal timing races where the textarea
+          // may be inserted into a pre-existing container the observer misses.
+          if (parentWindow.__disableChatPastePoll) clearInterval(parentWindow.__disableChatPastePoll);
+          let _attempts = 0;
+          parentWindow.__disableChatPastePoll = setInterval(() => {{
+            attachListener();
+            if (++_attempts >= 40) clearInterval(parentWindow.__disableChatPastePoll);
+          }}, 250);
         }})();
         </script>
         """,
@@ -563,7 +581,7 @@ else:
 if not st.session_state.messages:
     _t_open_start = time.perf_counter()
     st.session_state.messages.append(
-        {"role": "system", "content": config.SYSTEM_PROMPT_OPENAI}
+        {"role": "system", "content": SYSTEM_PROMPT_OPENAI}
     )
     _opening_n_chunks = 0
     _opening_ttft_ms = -1.0
