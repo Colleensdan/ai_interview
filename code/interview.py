@@ -64,6 +64,13 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
+if cfg.variant is None:
+    st.markdown(
+        "Sie haben die falsche Webseite aufgerufen. Dies ist ein Fehler. "
+        "Bitte schließen Sie diese Seite und melden Sie das Problem in Ihrer Umfrage."
+    )
+    st.stop()
+
 SYSTEM_PROMPT, SYSTEM_PROMPT_OPENAI = build_system_prompts(cfg.variant)
 
 
@@ -377,6 +384,14 @@ def _disable_paste_on_chat_input():
           const observer = new MutationObserver(attachListener);
           observer.observe(parentWindow.document.body, {{ childList: true, subtree: true }});
           parentWindow.__disableChatPasteObserver = observer;
+          // Polling fallback: covers React portal timing races where the textarea
+          // may be inserted into a pre-existing container the observer misses.
+          if (parentWindow.__disableChatPastePoll) clearInterval(parentWindow.__disableChatPastePoll);
+          let _attempts = 0;
+          parentWindow.__disableChatPastePoll = setInterval(() => {{
+            attachListener();
+            if (++_attempts >= 40) clearInterval(parentWindow.__disableChatPastePoll);
+          }}, 250);
         }})();
         </script>
         """,
