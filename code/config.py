@@ -115,7 +115,7 @@ TERMINATION_TOOLS = [
         "function": {
             "name": "end_interview",
             "description": (
-                "Verwende diese Funktion, wenn der Interviewpartner die Zusammenfassung oder wenn "
+                "Verwende diese Funktion, wenn der Interviewpartner die Zusammenfassung bewertet hat oder wenn "
                 "der Interviewpartner das Interview nicht fortsetzen möchte."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
