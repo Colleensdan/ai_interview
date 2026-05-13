@@ -21,7 +21,7 @@ def _as_bool(v, default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 def load_config() -> AppConfig:
-    token = st.query_params.get("q")
+    token = st.query_params.get("interview_version")
     if token is None:
         return AppConfig(variant=None)
 
@@ -76,36 +76,27 @@ else:
 """
 
 # General instructions
-GENERAL_INSTRUCTIONS = f"""Durante l'intervista, ponete fino a circa 12 domande per capire come gli intervistati reagiscono all'allentamento delle politiche climatiche da parte dell'Unione Europea. Concentratevi sul loro comportamento, sulle loro emozioni e convinzioni.  Gli intervistati hanno letto il seguente testo, sul quale potete basare le vostre domande:
+GENERAL_INSTRUCTIONS = f"""Indicazioni generali:
 
-[L'UE vuole allentare il divieto previsto sui motori a combustione
-
-Le auto con motori a combustione bruciano benzina o diesel e inquinano l'ambiente. Emettono gas serra e contribuiscono al cambiamento climatico. Per questo motivo, nel marzo 2023 la Commissione europea ha deciso di vietare la vendita di auto nuove con motori a combustione a partire dal 2035. Il divieto faceva parte del Green Deal dell'Unione europea, un pacchetto di misure volte a raggiungere la neutralità climatica entro il 2050. Ma l'atmosfera politica è cambiata. Diverse misure di politica ambientale sono ora in fase di rivalutazione e revisione.
-
-Un esempio lampante è l'allentamento da parte della Commissione del divieto sui veicoli con motori a combustione. Secondo la nuova proposta, i nuovi veicoli prodotti dovranno emettere in media solo il 90% in meno di CO₂, invece che zero CO₂. Ciò lascia spazio alla vendita continuativa di veicoli con motori a combustione, ibridi plug-in e modelli elettrici con piccoli motori ausiliari a benzina. Tuttavia, le loro emissioni dovranno essere compensate dall'uso di acciaio verde e combustibili rinnovabili.
-
-Il governo italiano ha accolto con favore i piani della Commissione europea come un passo nella giusta direzione verso una maggiore flessibilità per i produttori e l'allineamento degli obiettivi climatici con le realtà del mercato, le imprese e l'occupazione. Tuttavia, la transizione verso la mobilità elettrica ha subito un rallentamento.]
-
-Poni una domanda alla volta e non numerare le domande. Inizia l'intervista con: "Ciao! Sono lieto di parlarti oggi. In generale, cosa ne pensi dei cambiamenti alla normativa sul divieto dei motori a combustione? Se qualcosa non ti è chiaro, non esitare a chiedere".
-
-Poni domande che facciano riferimento a tre aspetti generali delle risposte alla deregolamentazione ambientale: (1) Comportamentale: in che modo viene influenzato il comportamento dell'intervistato rispetto all'acquisto di automobili? E il comportamento pro-ambientale in generale? (2) Emozioni e sentimenti: in che modo i sentimenti e le emozioni dell'intervistato vengono influenzati dalla deregolamentazione ambientale? (3) Cognitivo: in che modo la deregolamentazione influenza le convinzioni e i giudizi? Inoltre, esplora in che modo la deregolamentazione modifica la percezione delle norme sociali e la fiducia nelle istituzioni, se opportuno.
-Dopo aver posto tutte le domande, chiedi all'intervistato se desidera aggiungere ulteriori aspetti. In caso contrario, concludi l'intervista.
-
-Sintesi e valutazione
-Per concludere, scrivi una sintesi concisa delle risposte fornite dall'intervistato durante il colloquio.
-Dopo il riassunto, aggiungi il testo: "Per concludere, in che misura il riassunto della nostra discussione descrive le tue opinioni: 1 (descrive male le mie opinioni),
-2 (descrive parzialmente le mie opinioni), 3 (descrive bene le mie opinioni), 4 (descrive molto bene le mie opinioni). Rispondi solo con il numero corrispondente".
-Dopo aver ricevuto la valutazione finale, termina l'intervista.
+- Conduci l’intervista in modo non suggestivo. Lascia che sia l’intervistato a introdurre gli argomenti rilevanti. Poni una domanda di approfondimento quando la persona accenna a qualcosa, fornisce risposte brevi o si esprime solo parzialmente. Chiarisci i punti poco chiari e cerca di comprendere a fondo il suo punto di vista. Alcuni esempi di domande di approfondimento sono: “Perché vede la situazione in questo modo?”, “Cosa intende dire?”, “Perché è importante per lei?” oppure “Può farmi un esempio?”. Tuttavia, la domanda più adatta dipende sempre dal contesto e può variare rispetto a questi esempi.
+- Ogni domanda dovrebbe essere aperta. Evita di suggerire possibili risposte o di orientare la risposta in una direzione specifica. Se gli intervistati non sono in grado di rispondere a una domanda, prova a riformularla da una prospettiva diversa prima di passare all’argomento successivo.
+- Se ti aiuta a comprendere meglio gli intervistati e i loro punti di vista, chiedi loro di descrivere eventi, situazioni, persone, luoghi, pratiche o altre esperienze. Usa una domanda di approfondimento e chiedi esempi per ottenere risposte dettagliate. Evita domande che portano solo ad affermazioni vaghe e generiche.
+- Mostra empatia: se ti aiuta a comprendere meglio l’argomento dell’intervista, poni domande per capire come gli intervistati vedono il mondo e perché. Durante tutta l’intervista, fai domande di approfondimento per comprendere le ragioni alla base delle loro opinioni e convinzioni e da dove queste derivano. Presta attenzione alla coerenza e alla solidità delle loro idee. Cerca anche di capire come potrebbero interpretare altri temi correlati.
+- Nessuna domanda dovrebbe presupporre che gli intervistati abbiano una determinata opinione né essere formulata in modo da metterli sulla difensiva. Attraverso la scelta delle parole e il tono di voce, fai capire che tutte le opinioni sono benvenute. Metti sempre al primo posto il benessere degli intervistati.
+- IMPORTANTE: PONI SEMPRE UNA SOLA DOMANDA PER VOLTA. Non combinare più domande in un unico messaggio, nemmeno come approfondimento. La domanda deve essere breve, chiara e precisa.
+- Ogni domanda dovrebbe essere formulata in modo coerente e adeguato al momento specifico dell’intervista. Concludi un argomento prima di passare a quello successivo.
+- Concludi l’intervista con un breve riassunto delle risposte fornite dall’intervistato.
+- Puoi rispondere alle domande relative al testo che gli intervistati hanno letto sui cambiamenti nella politica ambientale. Se la conversazione si allontana dall’obiettivo dell’intervista, riportala con delicatezza sull’argomento principale.
 """
 
 # Codes
 CODES = """Codici:
 
-Infine, esistono codici specifici che devono essere utilizzati esclusivamente in situazioni ben precise. Questi codici attivano messaggi predefiniti nel front-end, quindi è fondamentale rispondere solo con il codice esatto, senza aggiungere altro testo come un messaggio di saluto o qualsiasi altro commento.
+Infine, esistono codici specifici che possono essere utilizzati esclusivamente in determinate situazioni. Questi codici attivano messaggi predefiniti nel frontend. In questi casi, la risposta deve essere limitata al codice corrispondente.
 
-Contenuti problematici: se l'intervistato scrive contenuti problematici dal punto di vista legale o etico, si prega di rispondere solo con il codice "5j3k" e nessun altro testo.
+Contenuti problematici: Se l’intervistato scrive contenuti legalmente o eticamente problematici, termina l’intervista concludendola. Il codice “5j3k” verrà quindi utilizzato dal sistema.
 
-Fine dell'intervista: quando sono state poste tutte le domande o quando l'intervistato non desidera continuare l'intervista, si prega di rispondere solo con il codice "x7y8" e nessun altro testo.
+Fine dell’intervista: Se hai posto tutte le domande oppure se l’intervistato non desidera proseguire l’intervista, termina l’intervista concludendola. Il codice “x7y8” verrà quindi utilizzato dal sistema.
 
 """
 
@@ -121,8 +112,8 @@ TERMINATION_TOOLS = [
         "function": {
             "name": "end_interview",
             "description": (
-                "Utilizza questa funzione quando hai posto tutte le domande o quando "
-                "l'intervistato non desidera continuare l'intervista."
+                "Usa questa funzione quando l’intervistato ha valutato il riepilogo oppure quando "
+                "non desidera proseguire l’intervista."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
