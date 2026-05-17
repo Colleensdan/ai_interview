@@ -408,7 +408,11 @@ def _get_client():
             api_key=_load_api_key("API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY")
         )
 
-client = _get_client()
+try:
+    client = _get_client()
+except Exception as e:
+    st.error(f"API configuration error — check your environment variables:\n\n{e}")
+    st.stop()
 
 # In case the interview history is still empty, pass system prompt to model, and
 # generate and display its first message
