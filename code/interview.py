@@ -53,7 +53,7 @@ st.set_page_config(page_title="Interview", page_icon="🎓")
 
 
 import config
-from config import load_config, prompts_dir, build_system_prompts
+from config import load_config, prompts_dir, build_system_prompts, _as_bool
 
 
 
@@ -260,35 +260,29 @@ MAPPING_HANDLER = _persist_mapping if _MAPPING_DIR else None
 def _load_api_key():
     """Return API credentials from local env.
 
-    Supports two providers — whichever credentials are present are used:
-      Azure OpenAI: set CJBS_API_KEY + CJBS_API_ENDPOINT (+ optionally CJBS_API_VERSION)
-      Plain OpenAI: set OPENAI_API_KEY
-    Azure takes precedence if both are set.
+    Switch providers by setting USE_AZURE in your .env:
+      USE_AZURE=true  (default) — uses CJBS_API_KEY + CJBS_API_ENDPOINT
+      USE_AZURE=false            — uses OPENAI_API_KEY
     """
-    azure_key      = os.getenv("CJBS_API_KEY")
-    azure_endpoint = os.getenv("CJBS_API_ENDPOINT")
-    api_version    = os.getenv("CJBS_API_VERSION", "2023-05-15")
-    openai_key     = os.getenv("OPENAI_API_KEY")
+    use_azure = _as_bool(os.getenv("USE_AZURE"), default=True)
     deployment_name = os.getenv("CJBS_DEPLOYMENT_NAME")
-
     if not deployment_name:
-        raise ValueError("Please set CJBS_DEPLOYMENT_NAME in your .env file (e.g., 'gpt-4o').")
+        raise ValueError("CJBS_DEPLOYMENT_NAME must be set in your .env file (e.g., 'gpt-4o').")
 
-    if azure_key and azure_endpoint:
-        if openai_key:
-            logging.warning(
-                "Both Azure (CJBS_API_KEY + CJBS_API_ENDPOINT) and plain OpenAI "
-                "(OPENAI_API_KEY) credentials are set — using Azure."
+    if use_azure:
+        key = os.getenv("CJBS_API_KEY")
+        endpoint = os.getenv("CJBS_API_ENDPOINT")
+        version = os.getenv("CJBS_API_VERSION", "2023-05-15")
+        if not key or not endpoint:
+            raise ValueError(
+                "USE_AZURE=true requires both CJBS_API_KEY and CJBS_API_ENDPOINT."
             )
-        return "azure", azure_key, azure_endpoint, api_version, deployment_name
-    elif openai_key:
-        return "openai", openai_key, None, None, deployment_name
+        return "azure", key, endpoint, version, deployment_name
     else:
-        raise ValueError(
-            "No OpenAI API credentials found. Set either:\n"
-            "  Azure OpenAI:  CJBS_API_KEY + CJBS_API_ENDPOINT\n"
-            "  Plain OpenAI:  OPENAI_API_KEY"
-        )
+        key = os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise ValueError("USE_AZURE=false requires OPENAI_API_KEY.")
+        return "openai", key, None, None, deployment_name
 
 
 def _sanitize_message_for_api(message):
@@ -548,7 +542,11 @@ def _get_client():
         client = OpenAI(api_key=key)
     return client, deployment_name
 
-client, _DEPLOYMENT_NAME = _get_client()
+try:
+    client, _DEPLOYMENT_NAME = _get_client()
+except Exception as e:
+    st.error(f"API configuration error — check your environment variables:\n\n{e}")
+    st.stop()
 
 # Render chat input early — it's fixed at the bottom of the viewport regardless of
 # call order, so the participant sees it immediately while the opening message generates.
