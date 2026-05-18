@@ -21,7 +21,7 @@ def _as_bool(v, default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 def load_config() -> AppConfig:
-    token = st.query_params.get("interview_version")
+    token = st.query_params.get("q")
     if token is None:
         return AppConfig(variant=None)
 
