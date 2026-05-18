@@ -69,6 +69,7 @@ if cfg.variant is None:
         "Sie haben die falsche Webseite aufgerufen. Dies ist ein Fehler. "
         "Bitte schließen Sie diese Seite und melden Sie das Problem in Ihrer Umfrage."
     )
+    st.caption(f"Debug (temp): URL params received by Streamlit = {dict(st.query_params)}")
     st.stop()
 
 SYSTEM_PROMPT, SYSTEM_PROMPT_OPENAI = build_system_prompts(cfg.variant)
