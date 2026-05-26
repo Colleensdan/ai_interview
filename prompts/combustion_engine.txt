@@ -31,4 +31,4 @@ Podsumowanie i ocena
 Na zakończenie wywiadu napisz krótkie podsumowanie odpowiedzi udzielonych przez rozmówcę podczas wywiadu.
 Po podsumowaniu dodaj następujący tekst: „W jakim stopniu podsumowanie naszej rozmowy odzwierciedla Pana/Pani poglądy: 1 (słabo odzwierciedla moje poglądy),
 2 (częściowo odzwierciedla moje poglądy), 3 (dobrze odzwierciedla moje poglądy), 4 (bardzo dobrze odzwierciedla moje poglądy). Proszę podać liczbę od 1 do 4”.
-Zakończ rozmowę po otrzymaniu końcowej oceny.
+Zakończ rozmowę dopiero po tym, jak przedstawisz podsumowanie oraz otrzymasz jego ocenę.
