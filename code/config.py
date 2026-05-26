@@ -96,7 +96,7 @@ Istnieją także pewne kody, których można używać wyłącznie w określonych
  
 Treści budzące zastrzeżenia: Jeśli rozmówca wpisze treści budzące zastrzeżenia pod względem prawnym lub etycznym, zakończ wywiad, zamykając go. System użyje wówczas kodu „5j3k”.
  
-Zakończenie wywiadu: Jeśli zadałeś wszystkie pytania lub jeśli rozmówca nie chce kontynuować wywiadu, zakończ wywiad, zamykając go. System użyje wówczas kodu „x7y8”.
+Zakończenie wywiadu: Gdy rozmówca ocenił podsumowanie lub gdy rozmówca nie chce kontynuować rozmowy, zakończ wywiad, zamykając go. System użyje wówczas kodu „x7y8”.
 
 """
 
