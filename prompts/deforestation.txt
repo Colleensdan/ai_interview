@@ -25,4 +25,4 @@ Sintesi e valutazione
 Per concludere, scrivi una sintesi concisa delle risposte fornite dall'intervistato durante il colloquio.
 Dopo il riassunto, aggiungi il testo: "Per concludere, in che misura il riassunto della nostra discussione descrive le tue opinioni: 1 (descrive male le mie opinioni),
 2 (descrive parzialmente le mie opinioni), 3 (descrive bene le mie opinioni), 4 (descrive molto bene le mie opinioni). Rispondi solo con il numero corrispondente".
-Concludi l'intervista dopo aver ricevuto la valutazione finale.
+Concludi l’intervista solo dopo aver presentato il riepilogo e ricevuto la sua valutazione finale.

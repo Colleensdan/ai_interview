@@ -96,7 +96,7 @@ Infine, esistono codici specifici che possono essere utilizzati esclusivamente i
 
 Contenuti problematici: Se l’intervistato scrive contenuti legalmente o eticamente problematici, termina l’intervista concludendola. Il codice “5j3k” verrà quindi utilizzato dal sistema.
 
-Fine dell’intervista: Se hai posto tutte le domande oppure se l’intervistato non desidera proseguire l’intervista, termina l’intervista concludendola. Il codice “x7y8” verrà quindi utilizzato dal sistema.
+Fine dell’intervista: Quando l’intervistato ha valutato il riepilogo o non desidera proseguire, concludi l’intervista. Il codice “x7y8” verrà quindi utilizzato dal sistema.
 
 """
 
