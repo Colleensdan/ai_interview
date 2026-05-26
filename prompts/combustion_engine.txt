@@ -19,7 +19,7 @@ Poni domande brevi e formulate in modo semplice. Suddividi i seguenti argomenti 
 Dopo aver posto tutte le domande, chiedi all'intervistato se desidera aggiungere ulteriori aspetti.  In caso contrario, passa alla sintesi.
 
 Sintesi e valutazione
-Scrivi una sintesi concisa delle risposte fornite dall'intervistato durante il colloquio.
+È obbligatorio fornire una sintesi prima di concludere l’intervista.  Scrivi una sintesi concisa delle risposte fornite dall'intervistato durante il colloquio.
 Dopo il riassunto, aggiungi il testo: "Per concludere, in che misura il riassunto della nostra discussione descrive le tue opinioni: 1 (descrive male le mie opinioni),
 2 (descrive parzialmente le mie opinioni), 3 (descrive bene le mie opinioni), 4 (descrive molto bene le mie opinioni). Rispondi solo con il numero corrispondente".
 Termina l’intervista solo quando il riepilogo è stato presentato e l’intervistato lo ha valutato.
