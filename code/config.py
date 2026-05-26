@@ -95,7 +95,7 @@ Endelig findes der visse koder, som udelukkende må bruges i bestemte situatione
 
 Problematisk indhold: Hvis interviewpersonen skriver indhold, der er juridisk eller etisk problematisk, skal du afslutte interviewet ved at afslutte interviewet. Koden "5j3k" anvendes derefter af systemet.
 
-Afslutning af interviewet: Når interviewpartneren har vurderet resuméet, eller hvis interviewpartneren ikke ønsker at fortsætte, skal du afslutte interviewet.  Koden "x7y8" bruges derefter af systemet.
+Afslutning af interviewet: Når interviewpartneren har vurderet resuméet, eller hvis interviewpartneren ønsker at afbryde interviewet, skal du afslutte interviewet derefter. Koden "x7y8" bruges derefter af systemet.
 
 """
 

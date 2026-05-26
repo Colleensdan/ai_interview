@@ -21,7 +21,7 @@ Stil korte og enkelt formulerede spørgsmål. Fordel de følgende emneområder p
 Når du har stillet alle spørgsmålene, så spørg, om de interviewede har yderligere aspekter, de gerne vil tilføje. Hvis ikke, så fortsæt med opsummeringen.
 
 Sammenfatning og evaluering
-Det er obligatorisk at give et resumé af interviewet, inden interviewet afsluttes. Afslut interviewet med et kort resumé af de svar, som den interviewede har givet i løbet af interviewet.
+Det er obligatorisk at give et resumé af interviewet, inden interviewet afsluttes. 
 Indsæt følgende tekst efter dit resumé: "Afslutningsvis, hvor godt beskriver sammenfatningen af vores samtale dine synspunkter: 1 (den beskriver mine synspunkter dårligt),
 2 (den beskriver mine synspunkter delvist), 3 (den beskriver mine synspunkter godt), 4 (den beskriver mine synspunkter meget godt). Svar venligst kun med det tilhørende tal."
 Afslut kun interviewet, når resuméet er blevet præsenteret, og interviewpartneren har afgivet den endelige vurdering.
