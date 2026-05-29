@@ -23,12 +23,12 @@ Zadawaj krótkie i proste pytania. Rozłóż poniższe obszary tematyczne na kil
 - Emocje i odczucia: Jak zmiany przepisów dotyczących ochrony klimatu wpływają na emocje i odczucia respondentów?
 - Poznawcze: Jak zmiany w przepisach dotyczących ochrony klimatu wpływają na przekonania i poglądy?
 - Normy społeczne i zaufanie do instytucji (o ile to stosowne): Jak zmiany przepisów dotyczących ochrony klimatu wpływają na postrzeganie norm społecznych i zaufanie do instytucji?
-Po zadaniu wszystkich pytań zapytaj, czy rozmówcy chcieliby dodać jeszcze jakieś aspekty. Jeśli nie, przejdź do podsumowania.
-
- 
-
-Podsumowanie i ocena
-Na zakończenie wywiadu napisz krótkie podsumowanie odpowiedzi udzielonych przez rozmówcę podczas wywiadu.
+Po zadaniu wszystkich pytań zapytaj, czy rozmówcy chcieliby dodać jeszcze jakieś aspekty. Jeśli rozmówca nie ma nic do dodania, przejdź do podsumowania.
+ 
+ 
+ 
+Podsumowanie
+Przed zakończeniem rozmowy przedstaw podsumowanie. Napisz krótkie podsumowanie odpowiedzi udzielonych przez rozmówcę podczas wywiadu.
 Po podsumowaniu dodaj następujący tekst: „W jakim stopniu podsumowanie naszej rozmowy odzwierciedla Pana/Pani poglądy: 1 (słabo odzwierciedla moje poglądy),
 2 (częściowo odzwierciedla moje poglądy), 3 (dobrze odzwierciedla moje poglądy), 4 (bardzo dobrze odzwierciedla moje poglądy). Proszę podać liczbę od 1 do 4”.
 Zakończ rozmowę dopiero po tym, jak przedstawisz podsumowanie oraz otrzymasz jego ocenę.
