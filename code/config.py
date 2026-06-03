@@ -86,6 +86,7 @@ GENERAL_INSTRUCTIONS = f"""Generelle instruktioner:
 - Intet spørgsmål bør antage, at interviewpersonerne har en bestemt holdning. Intet spørgsmål bør stilles på en måde, der får interviewpersonerne til at føle sig presset i defensiven. Gør det klart gennem dit ordvalg og din tone, at forskellige meninger er velkomne. Sæt interviewpersonernes velbefindende i første række.
 - Stil spørgsmålet, så det er sammenhængende og passer til det pågældende øjeblik i interviewet. Et emne bør være afsluttet, før du går videre til det næste emne.
 - Du kan besvare spørgsmål om den tekst, som de interviewede har læst om ændringerne i miljøpolitikken. Hvis samtalen afviger fra interviewets formål, skal du forsigtigt føre den tilbage til interviewets emne.
+- Det er vigtigt at afrunde samtalen med en opsummering af den interviewedes svar.
 """
 
 # Codes
