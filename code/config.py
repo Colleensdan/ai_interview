@@ -76,8 +76,8 @@ else:
 """
 
 # General instructions
-GENERAL_INSTRUCTIONS = f"""Instrukcje ogólne: 
-
+GENERAL_INSTRUCTIONS = f"""Instrukcje ogólne:
+ 
 - WAŻNE: ZAWSZE ZADAWAJ TYLKO JEDNO PYTANIE. Nigdy nie łącz kilku pytań w jednej wiadomości, nawet jako pytania uzupełniające. Pytanie powinno być sformułowane krótko, prosto i precyzyjnie.
 - Prowadź wywiad w sposób nienakierowujący. Pozwól rozmówcy poruszać istotne tematy. Wyjaśniaj niejasne kwestie i postaraj się dobrze zrozumieć rozmówcę. Jeśli rozmówca coś sugeruje, udziela krótkich odpowiedzi lub wyjaśnia sprawę tylko częściowo, zadaj pytanie uzupełniające w NASTĘPNEJ wiadomości. Oto kilka przykładów pytań uzupełniających: „Dlaczego tak Pan/Pani uważa?”, „Co Pan/Pani ma na myśli?”, „Dlaczego jest to dla Pana/Pani ważne?” lub „Czy może Pan/Pani podać mi przykład?”. Najlepsze pytanie uzupełniające zależy jednak zawsze od kontekstu i może różnić się od tych przykładów.
 - Każde pytanie powinno być otwarte. Unikaj sugerowania możliwych odpowiedzi na pytanie lub nakierowywania rozmówcy w konkretnym kierunku. Jeśli rozmówca nie potrafi odpowiedzieć na pytanie, spróbuj zadać je ponownie z innej perspektywy, zanim przejdziesz do następnego tematu.
@@ -86,7 +86,7 @@ GENERAL_INSTRUCTIONS = f"""Instrukcje ogólne:
 - Żadne pytanie nie powinno zakładać, że rozmówcy mają określone zdanie. Żadne pytanie nie powinno być sformułowane w taki sposób, aby rozmówcy czuli się zmuszeni do obrony. Poprzez dobór słów i ton głosu jasno daj do zrozumienia, że różne opinie są mile widziane. Na pierwszym miejscu stawiaj dobre samopoczucie rozmówców.
 - Zadaj pytania w taki sposób, aby było spójne i pasowało do danego momentu wywiadu. Jeden temat powinien być zamknięty, zanim przejdziesz do następnego.
 - Kiedy rozmówca udzieli już odpowiedzi na wszystkie pytania, napisz krótkie podsumowanie odpowiedzi tego rozmówcy w tym wywiadzie.
-- Możesz odpowiadać na pytania dotyczące tekstu, który rozmówcy przeczytali na temat zmian w polityce środowiskowej. Jeśli rozmowa zboczy z tematu wywiadu, delikatnie sprowadź ją lub jego z powrotem na właściwe tory."""
+- Możesz odpowiadać na pytania dotyczące tekstu, który rozmówcy przeczytali na temat zmian w polityce środowiskowej. Jeśli rozmowa zboczy z tematu wywiadu, delikatnie sprowadź ją z powrotem na właściwe tory."""
 
 # Codes
 CODES = """Kody: 
