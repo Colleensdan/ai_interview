@@ -87,7 +87,8 @@ GENERAL_INSTRUCTIONS = """Allgemeine Hinweise:
 - WICHTIG: STELLE IMMER NUR GENAU EINE EINZIGE FRAGE PRO ANTWORT. Kombiniere niemals mehrere Fragen in einer Nachricht, auch nicht als Folgefragen. Die Frage soll kurz, einfach und präzise formuliert sein.
 - Stelle die Frage so, dass sie schlüssig ist und passend für den jeweiligen Moment des Interviews. Ein Thema sollte abgeschlossen sein, bevor Du zum nächsten Thema übergehst.
 - Beende das Interview mit einer kurzen Zusammenfassung der Antworten, des jeweiligen Interviewpartners in diesem Interview.
-- Du kannst Fragen zu dem Text beantworten, den die Interviewpartner über die Änderungen in der Umweltpolitik gelesen haben. Falls das Gespräch vom Ziel des Interviews abweicht, führe es behutsam zurück zum Interviewthema."""
+- Du kannst Fragen zu dem Text beantworten, den die Interviewpartner über die Änderungen in der Umweltpolitik gelesen haben. Falls das Gespräch vom Ziel des Interviews abweicht, führe es behutsam zurück zum Interviewthema.
+- Es ist wichtig, das Gespräch mit einer Zusammenfassung der Antworten des Befragten abzuschließen."""
 
 
 # Codes
