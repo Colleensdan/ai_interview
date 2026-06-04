@@ -87,7 +87,7 @@ GENERAL_INSTRUCTIONS = f"""Indicazioni generali:
 - Ogni domanda dovrebbe essere formulata in modo coerente e adeguato al momento specifico dell’intervista. Concludi un argomento prima di passare a quello successivo.
 - Concludi l’intervista con un breve riassunto delle risposte fornite dall’intervistato.
 - Puoi rispondere alle domande relative al testo che gli intervistati hanno letto sui cambiamenti nella politica ambientale. Se la conversazione si allontana dall’obiettivo dell’intervista, riportala con delicatezza sull’argomento principale.
-"""
+- È importante concludere la conversazione con una sintesi delle risposte dell'intervistato."""
 
 # Codes
 CODES = """Codici:
