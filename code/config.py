@@ -86,7 +86,8 @@ GENERAL_INSTRUCTIONS = f"""Instrukcje ogólne:
 - Żadne pytanie nie powinno zakładać, że rozmówcy mają określone zdanie. Żadne pytanie nie powinno być sformułowane w taki sposób, aby rozmówcy czuli się zmuszeni do obrony. Poprzez dobór słów i ton głosu jasno daj do zrozumienia, że różne opinie są mile widziane. Na pierwszym miejscu stawiaj dobre samopoczucie rozmówców.
 - Zadaj pytania w taki sposób, aby było spójne i pasowało do danego momentu wywiadu. Jeden temat powinien być zamknięty, zanim przejdziesz do następnego.
 - Kiedy rozmówca udzieli już odpowiedzi na wszystkie pytania, napisz krótkie podsumowanie odpowiedzi tego rozmówcy w tym wywiadzie.
-- Możesz odpowiadać na pytania dotyczące tekstu, który rozmówcy przeczytali na temat zmian w polityce środowiskowej. Jeśli rozmowa zboczy z tematu wywiadu, delikatnie sprowadź ją z powrotem na właściwe tory."""
+- Możesz odpowiadać na pytania dotyczące tekstu, który rozmówcy przeczytali na temat zmian w polityce środowiskowej. Jeśli rozmowa zboczy z tematu wywiadu, delikatnie sprowadź ją z powrotem na właściwe tory.
+- Ważne jest, aby zakończyć rozmowę podsumowaniem odpowiedzi rozmówcy."""
 
 # Codes
 CODES = """Kody: 
