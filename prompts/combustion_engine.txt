@@ -16,9 +16,9 @@ Formulér hvert spørgsmål kort og enkelt. Fordel de følgende emneområder på
 - Følelser og følelsesmæssige reaktioner: Hvordan påvirkes de interviewedes følelser og følelsesmæssige reaktioner af ændringerne i klimabeskyttelsesreglerne?
 - Kognitivt: Hvordan påvirkes overbevisninger og synspunkter af ændringerne i klimabeskyttelsesreglerne?
 - Sociale normer og tillid til institutioner (hvis relevant): Hvordan påvirker ændringerne opfattelsen af sociale normer og tilliden til institutioner?
-Når du har stillet alle spørgsmålene, skal du spørge, om den interviewede har yderligere aspekter, vedkommende gerne vil tilføje. Når den interviewede angiver, at der ikke er noget yderligere, skal du straks fortsætte til sammenfatningen af samtalen. Interviewet er først afsluttet, når sammenfatningen er gennemført.
+Når du har stillet alle spørgsmålene, skal du spørge, om den interviewede har yderligere aspekter, vedkommende gerne vil tilføje. Når den interviewede angiver, at der ikke er noget yderligere, skal du straks fortsætte til sammenfatningen af samtalen:
 
-Sammenfatning (obligatorisk)
+- Sammenfatning (obligatorisk)
 VIGTIGT: Det er obligatorisk at udarbejde en sammenfatning af samtalen. Sammenfatningen skal altid gennemføres, og interviewet må ikke afsluttes uden en sammenfatning. Skriv en kort sammenfatning af de svar, som den interviewede gav under interviewet.
 Indsæt følgende tekst efter din sammenfatning: "Afslutningsvis, hvor godt beskriver sammenfatningen af vores samtale dine synspunkter: 1 (den beskriver mine synspunkter dårligt),
 2 (den beskriver mine synspunkter delvist), 3 (den beskriver mine synspunkter godt), 4 (den beskriver mine synspunkter meget godt). Svar venligst kun med det tilhørende tal."
