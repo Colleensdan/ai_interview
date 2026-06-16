@@ -113,7 +113,7 @@ TERMINATION_TOOLS = [
         "function": {
             "name": "end_interview",
             "description": (
-                "Usa questa funzione SOLO quando la sintesi è stata presentata all'intervistato e questi ha fornito una valutazione numerica della sintesi, oppure quando non desidera proseguire l’intervista."
+                "Usa questa funzione SOLO quando la sintesi è stata presentata all'intervistato e questi ha fornito una valutazione numerica della sintesi, oppure quando desidera concludere l’intervista. Verifica che sia presente una sintesi finale prima di utilizzare questa funzione."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
