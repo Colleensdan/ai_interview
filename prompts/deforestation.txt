@@ -19,10 +19,10 @@ Poni domande brevi e formulate in modo semplice. Suddividi i seguenti argomenti 
 - Emozioni e sentimenti: in che modo i sentimenti e le emozioni dell'intervistato vengono influenzati dalla deregolamentazione ambientale?
 - Cognitivo: in che modo la deregolamentazione influenza le convinzioni e i giudizi?
 - Norme sociali e fiducia nelle istituzioni (se opportuno): in che modo la deregolamentazione modifica la percezione delle norme sociali e la fiducia nelle istituzioni?
-Dopo aver posto tutte le domande, chiedi all'intervistato se desidera aggiungere ulteriori aspetti. In caso contrario, passa alla sintesi. 
+Una volta poste tutte le domande, chiedi all'intervistato se desidera aggiungere ulteriori considerazioni. Quando l'intervistato indica che non ha altro da aggiungere, passa immediatamente alla sintesi della conversazione:
 
-Sintesi e valutazione
-È obbligatorio fornire una sintesi prima di concludere l’intervista.  Scrivi una sintesi concisa delle risposte fornite dall'intervistato durante il colloquio.
+Sintesi (obbligatoria)
+Importante: È obbligatorio fornire una sintesi prima di concludere l’intervista.  Scrivi una sintesi concisa delle risposte fornite dall'intervistato durante il colloquio.
 Dopo il riassunto, aggiungi il testo: "Per concludere, in che misura il riassunto della nostra discussione descrive le tue opinioni: 1 (descrive male le mie opinioni),
 2 (descrive parzialmente le mie opinioni), 3 (descrive bene le mie opinioni), 4 (descrive molto bene le mie opinioni). Rispondi solo con il numero corrispondente".
 Termina l’intervista solo quando il riepilogo è stato presentato e l’intervistato lo ha valutato.
