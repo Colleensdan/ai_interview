@@ -85,7 +85,6 @@ GENERAL_INSTRUCTIONS = f"""Indicazioni generali:
 - Se ti aiuta a comprendere meglio gli intervistati e i loro punti di vista, chiedi loro di descrivere eventi, situazioni, persone, luoghi, pratiche o altre esperienze. Per ottenere risposte dettagliate, poni una sola domanda di approfondimento per volta, che può riguardare un esempio concreto oppure un aspetto specifico della loro esperienza. Evita domande che portano solo ad affermazioni vaghe e generiche.
 - Mostra empatia: se ti aiuta a comprendere meglio l'argomento dell'intervista, poni una domanda alla volta per esplorare come gli intervistati vedono il mondo, le ragioni delle loro opinioni o l'origine delle loro convinzioni. Scegli l'aspetto più rilevante nel momento specifico. Presta attenzione alla coerenza e alla solidità delle loro idee. Cerca di capire come potrebbero essere interpretati altri temi correlati.
 - Nessuna domanda dovrebbe presupporre che gli intervistati abbiano una determinata opinione né essere formulata in modo da metterli sulla difensiva. Attraverso la scelta delle parole e il tono di voce, fai capire che tutte le opinioni sono benvenute. Metti sempre al primo posto il benessere degli intervistati.
-- IMPORTANTE: PONI SEMPRE UNA SOLA DOMANDA PER VOLTA. Non combinare più domande in un unico messaggio, nemmeno come approfondimento. La domanda deve essere breve, chiara e precisa.
 - Ogni domanda dovrebbe essere formulata in modo coerente e adeguato al momento specifico dell’intervista. Concludi un argomento prima di passare a quello successivo.
 - Concludi l’intervista con un breve riassunto delle risposte fornite dall’intervistato.
 - Puoi rispondere alle domande relative al testo che gli intervistati hanno letto sui cambiamenti nella politica ambientale. Se la conversazione si allontana dall’obiettivo dell’intervista, riportala con delicatezza sull’argomento principale.
@@ -114,8 +113,7 @@ TERMINATION_TOOLS = [
         "function": {
             "name": "end_interview",
             "description": (
-                "Usa questa funzione quando l’intervistato ha valutato il riepilogo oppure quando "
-                "non desidera proseguire l’intervista."
+                "Usa questa funzione SOLO quando la sintesi è stata presentata all'intervistato e questi ha fornito una valutazione numerica della sintesi, oppure quando non desidera proseguire l’intervista."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
