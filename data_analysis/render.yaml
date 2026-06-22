@@ -31,6 +31,10 @@ services:
       # --- SharePoint source folder (configurable, not hardcoded) ---
       - key: AICODE_SHAREPOINT_DIR
         value: Test Data
+      # Deployment name is not a secret — pin it so the live model matches the
+      # data and isn't accidentally changed in the dashboard.
+      - key: CJBS_DEPLOYMENT_NAME
+        value: gpt-5-mini
       - key: PYTHON_VERSION
         value: "3.13.4"
       # --- secrets: set these in the Render dashboard (sync:false) ---
@@ -39,8 +43,6 @@ services:
       - key: CJBS_API_ENDPOINT
         sync: false
       - key: CJBS_API_VERSION
-        sync: false
-      - key: CJBS_DEPLOYMENT_NAME
         sync: false
       - key: TENANT_ID
         sync: false

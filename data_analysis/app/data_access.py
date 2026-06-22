@@ -61,18 +61,34 @@ class DataStore:
         return {c.name: c.definition for c in self._codes}
 
     # --- models ------------------------------------------------------------
+    def live_model(self) -> str | None:
+        """The model the live Azure deployment would code under (or None)."""
+        if config.AZURE_DEPLOYMENT:
+            return f"azure_openai-{config.AZURE_DEPLOYMENT}"
+        return None
+
     def models(self) -> list[str]:
-        """Selectable 'model data' for the UI (real models + majority vote)."""
+        """Selectable 'model data' for the UI, most-recently-used first.
+
+        Ordered by latest run (not alphabetically) so the active model leads;
+        majority vote is always last.
+        """
         with self._conn() as c:
-            rows = c.execute("SELECT DISTINCT model FROM kappa ORDER BY model").fetchall()
-        models = [r["model"] for r in rows]
-        # Put real models first, majority vote last; default first.
-        reals = [m for m in models if m != MAJORITY]
-        return reals + ([MAJORITY] if MAJORITY in models else [])
+            rows = c.execute(
+                "SELECT model, MAX(id) AS last FROM kappa GROUP BY model ORDER BY last DESC"
+            ).fetchall()
+        ordered = [r["model"] for r in rows]
+        reals = [m for m in ordered if m != MAJORITY]
+        return reals + ([MAJORITY] if MAJORITY in ordered else [])
 
     def default_model(self) -> str:
-        models = self.models()
-        return models[0] if models else MAJORITY
+        """Prefer the live deployment's model if it's in the data, else the
+        most-recently-used real model (deterministic, not alphabetical)."""
+        ms = self.models()
+        live = self.live_model()
+        if live and live in ms:
+            return live
+        return ms[0] if ms else MAJORITY
 
     # --- kappa -------------------------------------------------------------
     def latest_kappa(self, model: str) -> dict[str, float | None]:

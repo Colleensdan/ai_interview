@@ -34,13 +34,14 @@ Non-secret (already in `render.yaml`, override if needed):
 | `AICODE_OUTPUT_DIR` | `/var/data/outputs` |
 | `AICODE_DATA_ROOT` | `/var/data/input` |
 | `AICODE_SHAREPOINT_DIR` | `Test Data` |
+| `CJBS_DEPLOYMENT_NAME` | `gpt-5-mini` (pinned — not a secret; keep it matching the data) |
 | `PYTHON_VERSION` | `3.13.4` |
 
 Secrets (set as `sync:false` — **never committed**):
 
 | Var | Purpose |
 |-----|---------|
-| `CJBS_API_KEY`, `CJBS_API_ENDPOINT`, `CJBS_API_VERSION`, `CJBS_DEPLOYMENT_NAME` | Azure OpenAI |
+| `CJBS_API_KEY`, `CJBS_API_ENDPOINT`, `CJBS_API_VERSION` | Azure OpenAI (deployment name is pinned in `render.yaml`, not here) |
 | `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` | SharePoint (Microsoft Graph) auth |
 | `SP_HOSTNAME`, `SP_SITE_PATH`, `SP_LIBRARY_NAME` | SharePoint site / library |
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | the shared login (currently `Malte` / `Piotr`) |
