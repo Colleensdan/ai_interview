@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Codebook Improvement</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <!-- Top menu (5.1) -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <button id="hamburger" class="icon-btn" title="Menu" hidden>☰</button>
+      <span class="brand">Codebook&nbsp;Improvement</span>
+    </div>
+    <nav class="topbar-mid" id="topnav"></nav>
+    <div class="topbar-right">
+      <label class="model-pick" id="model-pick-wrap" hidden>
+        Model&nbsp;data
+        <select id="model-select"></select>
+      </label>
+      <button id="finish-btn" class="btn btn-green" hidden>Finish</button>
+    </div>
+  </header>
+
+  <main id="screen"></main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

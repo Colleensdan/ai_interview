@@ -1,0 +1,13 @@
+# Task 1 — LLM qualitative-coding pipeline
+openai>=1.63.2          # Azure OpenAI client (AzureOpenAI)
+python-dotenv>=1.0.1    # load data_analysis/.env
+python-docx>=1.2.0      # read .docx interview transcripts
+openpyxl>=3.1.5         # read .xlsx codebook + ground-truth counts
+# CSV, SQLite and Cohen's kappa use the standard library / no extra deps.
+
+# Task 2 — codebook-improvement app
+fastapi>=0.110           # API backend
+uvicorn>=0.27            # ASGI server
+itsdangerous>=2.1        # signed session cookies (login)
+python-multipart>=0.0.9  # parse the login form POST
+requests>=2.31           # SharePoint (Microsoft Graph) calls

@@ -1,0 +1,20 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Persistent / generated data (sourced from SharePoint or written at runtime)
+outputs/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+coding_seed.sqlite
+
+# Local test data (the deployed app pulls this from SharePoint "Test Data")
+Documents AI coding examples/
+
+# Windows "Mark of the Web" sidecars
+*:Zone.Identifier

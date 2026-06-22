@@ -1,0 +1,71 @@
+# Render deployment for the Task 2 codebook-improvement app.
+# Single web service (in-process background jobs) + a persistent disk at
+# /var/data holding the SQLite DB and CSV outputs. No separate worker / Redis:
+# the persistent disk pins this to a single instance, which keeps the in-process
+# job state consistent (see DEPLOY.md).
+services:
+  - type: web
+    name: codebook-improvement
+    runtime: python
+    plan: starter                 # required: persistent disks need a paid instance
+    rootDir: data_analysis        # the service runs from data_analysis/
+    buildCommand: pip install -r requirements.txt
+    # python -m guarantees the cwd is on sys.path (for `config`, `db`, `app`).
+    # --workers 1 so the in-memory job thread + polling stay consistent.
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      # --- persistence (point everything at the mounted disk) ---
+      - key: DATA_DIR
+        value: /var/data
+      - key: DATABASE_PATH
+        value: /var/data/coding.sqlite
+      - key: AICODE_OUTPUT_DIR
+        value: /var/data/outputs
+      - key: AICODE_DATA_ROOT          # SharePoint data is synced here on boot
+        value: /var/data/input
+      # --- SharePoint source folder (configurable, not hardcoded) ---
+      - key: AICODE_SHAREPOINT_DIR
+        value: Test Data
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      # --- secrets: set these in the Render dashboard (sync:false) ---
+      - key: CJBS_API_KEY
+        sync: false
+      - key: CJBS_API_ENDPOINT
+        sync: false
+      - key: CJBS_API_VERSION
+        sync: false
+      - key: CJBS_DEPLOYMENT_NAME
+        sync: false
+      - key: TENANT_ID
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: CLIENT_SECRET
+        sync: false
+      - key: SP_HOSTNAME
+        sync: false
+      - key: SP_SITE_PATH
+        sync: false
+      - key: SP_LIBRARY_NAME
+        sync: false
+      - key: AUTH_USERNAME
+        sync: false
+      - key: AUTH_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true            # Render generates a strong random secret
+      # --- future model keys (add when available) ---
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false

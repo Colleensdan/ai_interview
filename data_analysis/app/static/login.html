@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in · Codebook Improvement</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/login" id="login-form">
+    <div class="login-brand">Codebook&nbsp;Improvement</div>
+    <p class="login-sub">Please sign in to continue.</p>
+    <label class="login-field">
+      <span>Username</span>
+      <input name="username" autocomplete="username" autofocus required />
+    </label>
+    <label class="login-field">
+      <span>Password</span>
+      <input name="password" type="password" autocomplete="current-password" required />
+    </label>
+    <input type="hidden" name="next" id="next-field" value="/" />
+    <div class="login-error" id="login-error" hidden>Incorrect username or password.</div>
+    <button class="btn btn-primary login-submit" type="submit">Sign in</button>
+  </form>
+  <script>
+    const q = new URLSearchParams(location.search);
+    if (q.get("error")) document.getElementById("login-error").hidden = false;
+    const nxt = q.get("next");
+    if (nxt && nxt.startsWith("/")) document.getElementById("next-field").value = nxt;
+  </script>
+</body>
+</html>
