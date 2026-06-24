@@ -91,6 +91,22 @@ SQLITE_BUSY_TIMEOUT_MS = int(os.getenv("AICODE_SQLITE_BUSY_TIMEOUT_MS", "10000")
 # Files to always ignore when scanning directories.
 IGNORE_SUFFIXES = (":Zone.Identifier", ".Identifier")
 
+# --- Speaker roles (patch 2: code the interviewee only) ----------------------
+# Which speaker labels mark the interviewee (whose words ARE coded) vs the
+# interviewer (never coded). Lowercased substring match against the turn label,
+# so this handles both the real data ("user"/"assistant") and the test data
+# ("Speaker 2"/"Speaker 1"). Configurable via env (comma-separated).
+INTERVIEWEE_LABELS = [
+    s.strip().lower() for s in
+    os.getenv("AICODE_INTERVIEWEE_LABELS", "user,speaker 2,interviewee").split(",")
+    if s.strip()
+]
+INTERVIEWER_LABELS = [
+    s.strip().lower() for s in
+    os.getenv("AICODE_INTERVIEWER_LABELS", "assistant,speaker 1,interviewer").split(",")
+    if s.strip()
+]
+
 # --- Sampling ----------------------------------------------------------------
 # Fraction of ground-truth transcripts to code, and a fixed seed so a run is
 # reproducible (the same 50% is selected each time unless the seed changes).

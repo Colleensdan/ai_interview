@@ -79,18 +79,87 @@ def select_sample(
     return sorted(chosen, key=lambda i: i.title)
 
 
+# --- speaker roles (patch 2) ------------------------------------------------
+ROLE_INTERVIEWEE = "INTERVIEWEE"
+ROLE_INTERVIEWER = "INTERVIEWER"
+
+
+def _header_re() -> re.Pattern:
+    """Match a turn header: a known speaker label at line start (e.g.
+    'Speaker 2:', 'user:', 'assistant') with optional inline content."""
+    labels = sorted(
+        set(config.INTERVIEWEE_LABELS + config.INTERVIEWER_LABELS),
+        key=len, reverse=True,
+    )
+    alts = [re.escape(l) for l in labels] + [r"speaker\s*\d+"]
+    return re.compile(r"^\s*(" + "|".join(alts) + r")\s*(?::\s*(.*))?$", re.I)
+
+
+_HEADER_RE = _header_re()
+
+
+def classify_role(label: str) -> str:
+    """Interviewer if the label matches a configured interviewer label, else
+    interviewee. Unknown labels (e.g. a name) default to interviewee so we never
+    silently drop the interviewee's content."""
+    l = label.strip().lower()
+    if any(x in l for x in config.INTERVIEWER_LABELS):
+        return ROLE_INTERVIEWER
+    if any(x in l for x in config.INTERVIEWEE_LABELS):
+        return ROLE_INTERVIEWEE
+    return ROLE_INTERVIEWEE
+
+
+def parse_turns(text: str) -> list[tuple[str, str, str]]:
+    """Split a transcript into (role, label, content) turns by speaker headers.
+
+    If no speaker headers are found, the whole transcript is treated as one
+    interviewee turn (so coding still works on unlabelled data)."""
+    turns: list[tuple[str, str, str]] = []
+    role, label, buf, started = ROLE_INTERVIEWEE, "", [], False
+    for line in text.split("\n"):
+        m = _HEADER_RE.match(line)
+        if m:
+            if started:
+                turns.append((role, label, "\n".join(buf).strip()))
+            label = m.group(1).strip()
+            role = classify_role(label)
+            inline = m.group(2) or ""
+            buf = [inline] if inline.strip() else []
+            started = True
+        else:
+            buf.append(line)
+    if started:
+        turns.append((role, label, "\n".join(buf).strip()))
+    return turns or [(ROLE_INTERVIEWEE, "", text.strip())]
+
+
+def annotate_roles(text: str) -> str:
+    """Tag each turn so the model can code the interviewee and never the
+    interviewer. Content is kept verbatim, so returned quotes still match the
+    raw transcript for highlighting."""
+    parts = []
+    for role, label, content in parse_turns(text):
+        tag = ("[INTERVIEWEE — you MAY code this]" if role == ROLE_INTERVIEWEE
+               else "[INTERVIEWER — do NOT code this]")
+        head = f"{tag} {label}:".rstrip(":") if not label else f"{tag} {label}:"
+        parts.append(f"{head}\n{content}")
+    return "\n\n".join(parts)
+
+
 def merge_documents(interviews: list[Interview]) -> str:
     """Merge transcripts into one delimited document the LLM can parse.
 
     Each transcript is wrapped in clear BEGIN/END markers carrying its title,
     so the model can attribute every quote to the right file while we send the
-    set in a single request (spec 4.1).
+    set in a single request (spec 4.1). Turns are tagged INTERVIEWEE/INTERVIEWER
+    so the model codes only the interviewee (patch 2).
     """
     blocks = []
     for iv in interviews:
         blocks.append(
             f"===== BEGIN DOCUMENT | title: {iv.title} =====\n"
-            f"{iv.text}\n"
+            f"{annotate_roles(iv.text)}\n"
             f"===== END DOCUMENT | title: {iv.title} ====="
         )
     return "\n\n".join(blocks)

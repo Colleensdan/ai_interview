@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Passage in context</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    .ctx-head { padding: 14px 22px; border-bottom: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+    .ctx-head .code { font-weight: 700; }
+    .ctx-head .doc { color: var(--muted); font-size: 13px; }
+    .ctx-body { max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.75; font-size: 16.5px; white-space: pre-wrap; word-break: break-word; }
+    mark.ctx { background: #ffe08a; padding: 2px 0; border-radius: 3px; box-shadow: 0 0 0 2px #ffd45e; }
+  </style>
+</head>
+<body>
+  <div class="ctx-head">
+    <div class="code" id="code"></div>
+    <div class="doc" id="doc"></div>
+  </div>
+  <div class="ctx-body" id="body">Loading…</div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const doc = q.get("doc") || "";
+    const code = q.get("code") || "";
+    const quote = q.get("quote") || "";
+    const start = q.get("start"), end = q.get("end");
+    document.getElementById("code").textContent = code ? `Code: ${code}` : "Passage in context";
+    document.getElementById("doc").textContent = doc;
+
+    const params = new URLSearchParams({ doc, quote });
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+
+    fetch("/api/context?" + params.toString())
+      .then((r) => { if (r.status === 401) { location.href = "/login"; throw 0; } return r.json(); })
+      .then((d) => {
+        const body = document.getElementById("body");
+        body.textContent = "";
+        const s = d.start, e = d.end, text = d.text || "";
+        if (s == null || e == null) {
+          body.textContent = text;  // couldn't locate; show whole transcript
+          return;
+        }
+        body.append(document.createTextNode(text.slice(0, s)));
+        const m = document.createElement("mark");
+        m.className = "ctx";
+        m.textContent = text.slice(s, e);
+        body.append(m);
+        body.append(document.createTextNode(text.slice(e)));
+        m.scrollIntoView({ block: "center" });
+      })
+      .catch(() => { document.getElementById("body").textContent = "Could not load passage."; });
+  </script>
+</body>
+</html>

@@ -12,6 +12,7 @@ const S = {
   reasonsOpen: false,          // 5.5
   reasonList: [],              // 6a: AI reasons in render order
   activeReason: null,          // 6a: currently linked reason id
+  reasonSource: null,          // patch 4: "span" (text→reason) | "reason" (reason→text)
   job: null,                   // 5.8 current job status
 };
 
@@ -70,7 +71,14 @@ async function loadOverview() { S.overview = await api(`/api/overview?model=${en
 function renderTop() {
   $("#model-pick-wrap").hidden = !(S.screen === "compare" || S.screen === "start");
   $("#finish-btn").hidden = !(S.screen === "compare");
-  $("#hamburger").hidden = !(S.screen === "compare" && S.marginsHidden);
+  // Patch 8: the hamburger is the "restore the code-label margins" control.
+  // It is shown ONLY on the comparison screen when the margins are hidden
+  // (after the user closed them with X, or in the reasons view where they are
+  // hidden by default), and it clearly says what it does.
+  const hb = $("#hamburger");
+  hb.hidden = !(S.screen === "compare" && S.marginsHidden);
+  hb.textContent = "☰ Show code labels";
+  hb.classList.add("restore-btn");
   $("#model-select").value = S.model;
   if (!$("#logout-link")) {
     const a = el("a", { id: "logout-link", href: "/logout", class: "navlink", style: "text-decoration:none" }, "Sign out");
@@ -86,7 +94,8 @@ function renderTop() {
     nav.append(link("Review", "compare", () => {}));
     nav.append(el("button", { class: "navlink", onclick: openFailures }, "Failure modes"));
     nav.append(el("button", { class: "navlink" + (S.reasonsOpen ? " active" : ""), onclick: toggleReasons }, "Reasons"));
-    nav.append(el("button", { class: "navlink", onclick: () => { S.marginsHidden = !S.marginsHidden; render(); } }, S.marginsHidden ? "Show margins" : "Hide margins"));
+    // Margins are hidden via the X on each margin and restored via the
+    // hamburger (top-left); no separate nav toggle, to keep one clear control.
   }
 }
 
@@ -116,22 +125,30 @@ function renderStart(root) {
       el("div", { class: "lbl" }, `codes total  ·  model: ${esc(o.model)}`)),
   ));
 
-  const mkCol = (title, items, side) => {
+  const mkCol = (title, items, footer) => {
     const list = el("div", { class: "codelist" });
     items.forEach((it) => list.append(codeItem(it)));
     if (!items.length) list.append(el("div", { class: "empty" }, "None."));
-    return el("div", { class: "col" },
+    const col = el("div", { class: "col" },
       el("h3", {}, title, el("span", { class: "count" }, `${items.length}`)),
       list);
+    if (footer) col.append(footer);
+    return col;
   };
 
+  // Patch 7: "Select all unsuccessful" sits under the Unsuccessful column.
+  const allUnsuccessful = el("div", { class: "col-footer" },
+    el("button", {
+      class: "btn", disabled: o.fail.length === 0,
+      onclick: () => { o.fail.forEach((e) => S.selected.add(e.code)); render(); },
+    }, "Select all unsuccessful"));
+
   wrap.append(el("div", { class: "columns" },
-    mkCol("✓ Successful codes", o.success, "left"),
-    mkCol("✗ Unsuccessful codes", o.fail, "right"),
+    mkCol("✓ Successful codes", o.success),
+    mkCol("✗ Unsuccessful codes", o.fail, allUnsuccessful),
   ));
 
   wrap.append(el("div", { class: "start-actions" },
-    el("button", { class: "btn", onclick: () => { o.fail.forEach((e) => S.selected.add(e.code)); render(); } }, "All unsuccessful"),
     el("button", { class: "btn", onclick: () => { S.selected.clear(); render(); } }, "Clear"),
     el("span", { class: "hint" }, `${S.selected.size} selected`),
     el("span", { class: "spacer" }),
@@ -204,8 +221,34 @@ function renderSegments(segments, colors, collectReasons = false) {
 // 6a: clicking an AI span highlights + scrolls its reason to the top of the panel.
 function linkReason(rid) {
   S.activeReason = rid;
+  S.reasonSource = "span";
   if (!S.reasonsOpen) { S.reasonsOpen = true; S.marginsHidden = true; }
   render();
+}
+
+function flashMark(m) {
+  m.classList.add("flash");
+  setTimeout(() => m.classList.remove("flash"), 1200);
+}
+
+// Patch 1: lock the two interview panels so scrolling one scrolls the other to
+// the matching position (proportional, since both render the same transcript).
+function setupSyncScroll() {
+  const readings = document.querySelectorAll(".panels .reading");
+  if (readings.length < 2) return;
+  let lock = false;
+  readings.forEach((src) => {
+    src.addEventListener("scroll", () => {
+      if (lock) return;
+      lock = true;
+      const denom = Math.max(1, src.scrollHeight - src.clientHeight);
+      const ratio = src.scrollTop / denom;
+      readings.forEach((dst) => {
+        if (dst !== src) dst.scrollTop = ratio * (dst.scrollHeight - dst.clientHeight);
+      });
+      requestAnimationFrame(() => { lock = false; });
+    });
+  });
 }
 
 // 6b: floating code label at the cursor after a brief rest on a highlight.
@@ -283,14 +326,20 @@ function renderCompare(root) {
   const container = el("div", { style: "display:flex;flex-direction:column;flex:1;min-height:0;" }, compareWrap, foot);
   root.append(container);
 
-  // 6a: scroll the linked reason to the top of the reasons panel.
-  if (S.reasonsOpen && S.activeReason != null) {
-    requestAnimationFrame(() => {
-      const body = document.querySelector(".reasons-pane .rp-body");
-      const card = body && body.querySelector(`[data-rid="${S.activeReason}"]`);
-      if (body && card) body.scrollTop = card.offsetTop - body.offsetTop;
-    });
-  }
+  requestAnimationFrame(() => {
+    setupSyncScroll();  // patch 1
+    if (!(S.reasonsOpen && S.activeReason != null)) return;
+    const body = document.querySelector(".reasons-pane .rp-body");
+    const card = body && body.querySelector(`.reason-card[data-rid="${S.activeReason}"]`);
+    const mark = document.querySelector(`.panel.ai mark.hl[data-rid="${S.activeReason}"]`);
+    // Reason card always scrolls to the top of its panel (6a).
+    if (body && card) body.scrollTop = card.offsetTop - body.offsetTop;
+    // Patch 4: if the user clicked a REASON, also jump the text to its span.
+    if (S.reasonSource === "reason" && mark) {
+      mark.scrollIntoView({ block: "center" });
+      flashMark(mark);
+    }
+  });
 }
 
 async function nav(d) {
@@ -317,13 +366,13 @@ function reasonsPane() {
       el("div", { class: "rc-code" }, c.code),
       el("div", { class: "rc-quote" }, `"${c.quote.trim().slice(0, 180)}"`),
       el("div", { class: "rc-reason" }, c.reason));
-    card.addEventListener("click", () => { S.activeReason = c.rid; render(); });
+    card.addEventListener("click", () => { S.activeReason = c.rid; S.reasonSource = "reason"; render(); });
     body.append(card);
   });
   return el("div", { class: "reasons-pane" },
     el("div", { class: "rp-head" },
       el("span", {}, "Why the AI chose these codes"),
-      el("span", { class: "hint", style: "font-weight:400;font-size:11px" }, "click a highlight to jump"),
+      el("span", { class: "hint", style: "font-weight:400;font-size:11px" }, "click a highlight or a reason to jump"),
       el("button", { class: "icon-btn", onclick: toggleReasons }, "✕")),
     body);
 }
@@ -334,21 +383,31 @@ async function openFailures() {
   let data;
   try { data = await api(`/api/failures?model=${encodeURIComponent(S.model)}&codes=${encodeURIComponent([...S.selected].join("||"))}`); }
   catch (e) { toast("Failed to load: " + e.message); return; }
+  const failItem = (code, item, withReason) => {
+    const p = { doc: item.document, code, quote: item.quote };
+    if (item.start != null) { p.start = item.start; p.end = item.end; }
+    const link = el("a", {
+      class: "q fail-quote-link", href: "/context?" + new URLSearchParams(p).toString(),
+      target: "_blank", rel: "noopener", title: "Open this passage in its full interview context (new tab)",
+    }, `"${item.quote.slice(0, 160)}"`);
+    const node = el("div", { class: "fail-item" }, el("div", { class: "doc" }, item.document), link);
+    if (withReason && item.reason) node.append(el("div", { class: "fi-reason" }, item.reason));
+    return node;
+  };
+  // Each failure is an individual span (patch 3).
   const blocks = data.failures.map((f) => el("div", { class: "fail-code-block" },
     el("h4", {}, f.code),
     el("div", { class: "fail-grid" },
       el("div", { class: "fail-col fp" },
         el("h5", {}, `Found where it should NOT be (${f.false_positives.length})`),
-        ...(f.false_positives.length ? f.false_positives.map((fp) => el("div", { class: "fail-item" },
-          el("div", { class: "doc" }, fp.document),
-          ...fp.ai_quotes.slice(0, 3).map((q) => el("div", {},
-            el("div", { class: "q" }, `"${q.quote.slice(0, 140)}"`),
-            el("div", {}, q.reason || ""))))) : [el("div", { class: "empty" }, "None.")])),
+        ...(f.false_positives.length
+          ? f.false_positives.map((fp) => failItem(f.code, fp, true))
+          : [el("div", { class: "empty" }, "None.")])),
       el("div", { class: "fail-col fn" },
         el("h5", {}, `Missed where it SHOULD be (${f.false_negatives.length})`),
-        ...(f.false_negatives.length ? f.false_negatives.map((fn) => el("div", { class: "fail-item" },
-          el("div", { class: "doc" }, fn.document),
-          ...fn.human_quotes.slice(0, 3).map((q) => el("div", { class: "q" }, `"${q.slice(0, 140)}"`)))) : [el("div", { class: "empty" }, "None.")])),
+        ...(f.false_negatives.length
+          ? f.false_negatives.map((fn) => failItem(f.code, fn, false))
+          : [el("div", { class: "empty" }, "None.")])),
     )));
   const overlay = el("div", { class: "fail-overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
     el("div", { class: "fail-modal" },
@@ -402,6 +461,8 @@ function defCard(d) {
   return el("div", { class: "def-card", "data-code": d.code },
     el("h3", {}, d.code),
     el("div", { class: "kappa-badge" }, `current κ ${kfmt(d.current.kappa)} · v${d.current.version}`),
+    el("div", { class: "hint" }, "Initial human definition (fixed reference — never changes)"),
+    el("div", { class: "def-box def-initial" }, d.initial.definition),
     el("div", { class: "hint" }, "Current definition"),
     box,
     el("div", { class: "hint" }, "New definition"),

@@ -254,23 +254,79 @@ class DataStore:
             segments.append({"text": text[cursor:], "codes": []})
         return segments
 
-    # --- failure modes (spec 5.3) -----------------------------------------
+    # --- located coded spans ----------------------------------------------
+    def _ai_spans(self, model: str, doc: str, code: str) -> list[dict]:
+        """AI-coded spans for a code in a doc, with offsets (start/end may be
+        None if the quote can't be located)."""
+        text = self._interviews.get(doc, "")
+        norm = self._norm.get(doc)
+        spans = []
+        for h in self.ai_hits(model, doc, [code]):
+            sp = locate(text, h["quote"], norm=norm)
+            spans.append({"quote": h["quote"], "reason": h["reason"],
+                          "start": sp.start if sp else None,
+                          "end": sp.end if sp else None})
+        return spans
+
+    def _human_spans(self, doc: str, code: str) -> list[dict]:
+        return [{"quote": h["quote"], "start": h["start"], "end": h["end"]}
+                for h in self.human_hits(doc, [code])]
+
+    @staticmethod
+    def _overlaps_any(span: dict, others: list[dict]) -> bool:
+        """True if span's char range overlaps ANY other span's range.
+
+        Any overlap counts as agreement (spans need not be identical). Spans
+        that couldn't be located (start is None) never overlap."""
+        a0, a1 = span["start"], span["end"]
+        if a0 is None:
+            return False
+        for o in others:
+            b0, b1 = o["start"], o["end"]
+            if b0 is None:
+                continue
+            if a0 < b1 and b0 < a1:  # half-open interval overlap
+                return True
+        return False
+
+    # --- failure modes (spec 5.3; patch 3: span-overlap level) -------------
     def failures(self, model: str, codes: list[str]) -> list[dict]:
-        """Per code: false positives (AI present, human absent) and false
-        negatives (human present, AI absent), per document, with reasons."""
+        """Per code, failures at the SPAN level using human/AI overlap.
+
+        For the same code in the same transcript:
+        - false positive: an AI span overlapping NO human span;
+        - false negative: a human span overlapping NO AI span.
+        Any overlap (even partial) = agreement, so it is not listed. Each
+        failure is an individual span (document, offsets, quote, reason), not a
+        whole interview. NOTE: this is display only — Cohen's kappa is unchanged
+        (still binary present/absent per code per transcript in agreement.py)."""
         docs = self.sampled_docs()
         out = []
         for code in codes:
             fp, fn = [], []
             for doc in docs:
-                ai = self.ai_hits(model, doc, [code])
-                human = self.human_hits(doc, [code])
-                ai_present, human_present = bool(ai), bool(human)
-                if ai_present and not human_present:
-                    fp.append({"document": doc,
-                               "ai_quotes": [{"quote": h["quote"], "reason": h["reason"]} for h in ai]})
-                elif human_present and not ai_present:
-                    fn.append({"document": doc,
-                               "human_quotes": [h["quote"] for h in human]})
+                ai_spans = self._ai_spans(model, doc, code)
+                human_spans = self._human_spans(doc, code)
+                for a in ai_spans:
+                    if not self._overlaps_any(a, human_spans):
+                        fp.append({"document": doc, "quote": a["quote"],
+                                   "reason": a["reason"],
+                                   "start": a["start"], "end": a["end"]})
+                for h in human_spans:
+                    if not self._overlaps_any(h, ai_spans):
+                        fn.append({"document": doc, "quote": h["quote"],
+                                   "start": h["start"], "end": h["end"]})
             out.append({"code": code, "false_positives": fp, "false_negatives": fn})
         return out
+
+    # --- single-passage context (patch 5) ----------------------------------
+    def context(self, doc: str, quote: str, start=None, end=None) -> dict:
+        """Full transcript text plus the char span to highlight for a quote.
+
+        Used by the /context view so a reviewer can see a failure quote in its
+        surrounding interview. Locates the quote if offsets aren't supplied."""
+        text = self._interviews.get(doc, "")
+        if start is None or end is None:
+            sp = locate(text, quote, norm=self._norm.get(doc))
+            start, end = (sp.start, sp.end) if sp else (None, None)
+        return {"title": doc, "text": text, "start": start, "end": end}

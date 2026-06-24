@@ -173,7 +173,20 @@ def api_definition(code: str):
         raise HTTPException(404, f"Unknown code: {code}")
     current = next((h for h in history if h["is_current"]), history[0])
     archived = [h for h in history if not h["is_current"]]
-    return {"code": code, "current": current, "archived": archived}
+    initial = min(history, key=lambda h: h["version"])  # v1 = human starting point
+    return {"code": code, "current": current, "archived": archived, "initial": initial}
+
+
+@app.get("/api/context")
+def api_context(doc: str, quote: str, start: int | None = None, end: int | None = None):
+    if doc not in data().sampled_docs():
+        raise HTTPException(404, f"Unknown document: {doc}")
+    return data().context(doc, quote, start, end)
+
+
+@app.get("/context")
+def context_page():
+    return FileResponse(STATIC / "context.html")
 
 
 class DefinitionUpdate(BaseModel):

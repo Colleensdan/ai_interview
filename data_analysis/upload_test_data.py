@@ -13,6 +13,7 @@ Reports clearly if the app registration is read-only (HTTP 403 on upload).
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -27,6 +28,14 @@ def _ignored(name: str) -> bool:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Upload test data to SharePoint 'Test Data'.")
+    parser.add_argument(
+        "--seed-only", action="store_true",
+        help="Only re-upload coding_seed.sqlite (the results DB). Use after a "
+             "full re-run so a fresh Render disk re-seeds with the new data.",
+    )
+    args = parser.parse_args()
+
     base = config.SHAREPOINT_DIR  # "Test Data" (configurable)
     root = config.TEMPLATE_ROOT
     if not sp.configured():
@@ -36,19 +45,23 @@ def main() -> int:
     # (remote_path, local_path) pairs.
     uploads: list[tuple[str, Path]] = []
 
-    interviews = root / "Interviews"
-    for p in sorted(interviews.iterdir()) if interviews.is_dir() else []:
-        if p.is_file() and not _ignored(p.name) and p.suffix.lower() == ".docx":
-            uploads.append((f"{base}/Interviews/{p.name}", p))
+    if not args.seed_only:
+        interviews = root / "Interviews"
+        for p in sorted(interviews.iterdir()) if interviews.is_dir() else []:
+            if p.is_file() and not _ignored(p.name) and p.suffix.lower() == ".docx":
+                uploads.append((f"{base}/Interviews/{p.name}", p))
 
-    for fname in ("Codebook.xlsx", "Ground Truth.xlsx", "CountData.xlsx"):
-        f = root / fname
-        if f.is_file():
-            uploads.append((f"{base}/{fname}", f))
+        for fname in ("Codebook.xlsx", "Ground Truth.xlsx", "CountData.xlsx"):
+            f = root / fname
+            if f.is_file():
+                uploads.append((f"{base}/{fname}", f))
 
     # Seed DB so the deployed app can populate /var/data on first boot.
     if Path(config.DB_PATH).is_file():
         uploads.append((f"{base}/coding_seed.sqlite", Path(config.DB_PATH)))
+    elif args.seed_only:
+        print(f"No DB at {config.DB_PATH} to upload.", file=sys.stderr)
+        return 2
 
     if not uploads:
         print(f"Nothing to upload from {root}", file=sys.stderr)

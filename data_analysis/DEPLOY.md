@@ -63,6 +63,18 @@ Alternative manual seed (if you prefer not to route the DB through SharePoint):
 open the Render **Shell** and copy a local `coding.sqlite` to
 `/var/data/coding.sqlite`.
 
+### Refreshing the data after a re-run (e.g. after the patch-2 coding change)
+
+Changing what gets coded (patch 2: code the interviewee only) requires re-running
+the analysis, then shipping the new results to the deployed app:
+
+1. Locally: `python run_pipeline.py` (full re-run, ~30 min, real Azure cost).
+2. Re-upload just the refreshed DB as the SharePoint seed:
+   `python upload_test_data.py --seed-only`
+3. Make Render pick it up — either delete `/var/data/coding.sqlite` in the
+   Render **Shell** (it re-seeds from SharePoint on next boot) and redeploy, or
+   re-run the pipeline directly in the Render Shell writing to `/var/data`.
+
 ## Verifying the persistent disk survives a restart
 
 1. Sign in, run a **Re-Analyse** on a code, and note its new κ on the results
