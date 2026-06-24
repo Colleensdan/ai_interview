@@ -92,18 +92,20 @@ SQLITE_BUSY_TIMEOUT_MS = int(os.getenv("AICODE_SQLITE_BUSY_TIMEOUT_MS", "10000")
 IGNORE_SUFFIXES = (":Zone.Identifier", ".Identifier")
 
 # --- Speaker roles (patch 2: code the interviewee only) ----------------------
-# Which speaker labels mark the interviewee (whose words ARE coded) vs the
-# interviewer (never coded). Lowercased substring match against the turn label,
-# so this handles both the real data ("user"/"assistant") and the test data
-# ("Speaker 2"/"Speaker 1"). Configurable via env (comma-separated).
+# EXPLICIT role labels that mark the interviewee (coded) vs the interviewer
+# (never coded). Lowercased substring match against the turn label. Role-coding
+# is applied ONLY to transcripts that use these explicit labels (the real data,
+# e.g. "user"/"assistant"). Positional labels ("Speaker 1/2", names) are NOT
+# role-restricted — all speakers are coded — because their numbering is not a
+# reliable interviewer/interviewee signal in the test data.
 INTERVIEWEE_LABELS = [
     s.strip().lower() for s in
-    os.getenv("AICODE_INTERVIEWEE_LABELS", "user,speaker 2,interviewee").split(",")
+    os.getenv("AICODE_INTERVIEWEE_LABELS", "user,interviewee").split(",")
     if s.strip()
 ]
 INTERVIEWER_LABELS = [
     s.strip().lower() for s in
-    os.getenv("AICODE_INTERVIEWER_LABELS", "assistant,speaker 1,interviewer").split(",")
+    os.getenv("AICODE_INTERVIEWER_LABELS", "assistant,interviewer").split(",")
     if s.strip()
 ]
 

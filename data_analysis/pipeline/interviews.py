@@ -98,16 +98,16 @@ def _header_re() -> re.Pattern:
 _HEADER_RE = _header_re()
 
 
-def classify_role(label: str) -> str:
-    """Interviewer if the label matches a configured interviewer label, else
-    interviewee. Unknown labels (e.g. a name) default to interviewee so we never
-    silently drop the interviewee's content."""
+def classify_role(label: str) -> str | None:
+    """Return the EXPLICIT role for a label, or None if the label is positional
+    (e.g. 'Speaker 1') or a name — i.e. not a reliable role signal. Only
+    explicit labels (user/assistant/interviewee/interviewer) drive role-coding."""
     l = label.strip().lower()
     if any(x in l for x in config.INTERVIEWER_LABELS):
         return ROLE_INTERVIEWER
     if any(x in l for x in config.INTERVIEWEE_LABELS):
         return ROLE_INTERVIEWEE
-    return ROLE_INTERVIEWEE
+    return None
 
 
 def parse_turns(text: str) -> list[tuple[str, str, str]]:
@@ -131,18 +131,30 @@ def parse_turns(text: str) -> list[tuple[str, str, str]]:
             buf.append(line)
     if started:
         turns.append((role, label, "\n".join(buf).strip()))
-    return turns or [(ROLE_INTERVIEWEE, "", text.strip())]
+    return turns or [(None, "", text.strip())]
+
+
+def has_explicit_roles(text: str) -> bool:
+    """True if the transcript uses explicit role labels (user/assistant/…),
+    so role-coding can be applied reliably. Positional 'Speaker N'/name data
+    returns False and is left un-restricted (all speakers coded)."""
+    return any(role is not None for role, _, _ in parse_turns(text))
 
 
 def annotate_roles(text: str) -> str:
-    """Tag each turn so the model can code the interviewee and never the
-    interviewer. Content is kept verbatim, so returned quotes still match the
-    raw transcript for highlighting."""
+    """Tag turns INTERVIEWEE/INTERVIEWER **only** when the transcript uses
+    explicit role labels, so the model never codes the interviewer there.
+    For positional/name-labelled transcripts (no reliable role signal), the
+    text is returned unchanged and all speakers remain codeable. Content is kept
+    verbatim, so returned quotes still match the raw transcript for highlighting.
+    """
+    if not has_explicit_roles(text):
+        return text
     parts = []
     for role, label, content in parse_turns(text):
-        tag = ("[INTERVIEWEE — you MAY code this]" if role == ROLE_INTERVIEWEE
-               else "[INTERVIEWER — do NOT code this]")
-        head = f"{tag} {label}:".rstrip(":") if not label else f"{tag} {label}:"
+        tag = ("[INTERVIEWER — do NOT code this]" if role == ROLE_INTERVIEWER
+               else "[INTERVIEWEE — you MAY code this]")
+        head = f"{tag} {label}:" if label else tag
         parts.append(f"{head}\n{content}")
     return "\n\n".join(parts)
 
@@ -153,7 +165,9 @@ def merge_documents(interviews: list[Interview]) -> str:
     Each transcript is wrapped in clear BEGIN/END markers carrying its title,
     so the model can attribute every quote to the right file while we send the
     set in a single request (spec 4.1). Turns are tagged INTERVIEWEE/INTERVIEWER
-    so the model codes only the interviewee (patch 2).
+    only for transcripts with explicit role labels, so the model codes only the
+    interviewee there; positional/name-labelled transcripts are left untagged
+    (all speakers coded).
     """
     blocks = []
     for iv in interviews:
