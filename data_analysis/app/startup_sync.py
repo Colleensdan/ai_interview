@@ -1,15 +1,19 @@
-"""Pull input data (and seed the results DB) from SharePoint at app startup.
+"""Pull input data (and the results DB) from SharePoint at app startup.
 
-Downloads the configured SharePoint folder (default "Test Data") into the local
-input dir, and — only if the results DB doesn't exist yet — seeds it from
-``<SHAREPOINT_DIR>/coding_seed.sqlite``. Designed for Render: a fresh persistent
-disk self-populates on first boot.
+Two modes (see config.MEMORY_DB):
 
-Behaviour (per agreed defaults):
-- Cache: skip the input download if data is already present, unless
-  AICODE_SP_REFRESH is set.
-- Graceful: if SharePoint is unreachable or scope is read-blocked, log a warning
-  and continue with whatever is already on disk (never crash the boot).
+* **File mode** — download the configured SharePoint folder to the local input
+  dir and, only if the results DB doesn't exist yet, seed it from
+  ``<SHAREPOINT_DIR>/coding_seed.sqlite``. Designed for a persistent disk that
+  self-populates on first boot.
+
+* **Memory mode (RAM-only)** — download the input files into process memory
+  (never to disk) and hydrate the in-memory results DB from the authoritative
+  ``state/coding.sqlite`` blob on **every** boot (via ``state_sync.hydrate``).
+  SharePoint is the single durable store.
+
+Both modes are graceful: if SharePoint is unreachable the app still boots with
+whatever data is available.
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ from pathlib import Path
 
 import config
 from . import sharepoint_io as sp
+from . import state_sync
+from .inputs import InputStore
 
 log = logging.getLogger("app.startup_sync")
 
@@ -35,6 +41,51 @@ def _local_for(remote_path: str, base: str, root: Path) -> Path:
     return root / rel
 
 
+def sync() -> InputStore:
+    """Populate inputs (+ results DB) and return the InputStore the app reads from."""
+    if config.MEMORY_DB:
+        return _sync_memory()
+    return _sync_disk()
+
+
+# --- memory mode (RAM-only) -------------------------------------------------
+
+def _download_into_store(base: str, remote: str, store: InputStore) -> int:
+    count = 0
+    for item in sp.list_folder(remote):
+        if _ignored(item["name"]) or item["name"] == SEED_DB_NAME:
+            continue
+        if item["is_folder"]:
+            count += _download_into_store(base, item["path"], store)
+        else:
+            rel = item["path"][len(base):].lstrip("/")
+            if store.route(rel, sp.download_bytes(item["path"])):
+                count += 1
+    return count
+
+
+def _sync_memory() -> InputStore:
+    store = InputStore(from_disk=False)
+    if not sp.configured():
+        # Local dev running memory mode without SharePoint: fall back to reading
+        # the on-disk sample inputs so the app is usable. (On Render, SharePoint
+        # is always configured, so this branch never runs in production.)
+        log.warning("Memory mode but SharePoint not configured; using local disk "
+                    "inputs for this session.")
+        return InputStore(from_disk=True)
+    base = config.SHAREPOINT_DIR
+    try:
+        n = _download_into_store(base, base, store)
+        log.info("Loaded %d input file(s) from SharePoint '%s' into memory.", n, base)
+    except sp.SharePointError as e:
+        log.warning("SharePoint input download failed (%s); inputs may be incomplete.", e)
+    # Authoritative results DB: load from SharePoint on every boot.
+    state_sync.hydrate()
+    return store
+
+
+# --- file mode (persistent disk) --------------------------------------------
+
 def _download_tree(base: str, remote: str, root: Path) -> int:
     count = 0
     for item in sp.list_folder(remote):
@@ -50,10 +101,10 @@ def _download_tree(base: str, remote: str, root: Path) -> int:
     return count
 
 
-def sync() -> None:
+def _sync_disk() -> InputStore:
     if not sp.configured():
         log.info("SharePoint not configured; using local data only.")
-        return
+        return InputStore(from_disk=True)
 
     base = config.SHAREPOINT_DIR
     root = Path(config.TEMPLATE_ROOT)
@@ -74,10 +125,11 @@ def sync() -> None:
     have_data = interviews.is_dir() and any(interviews.glob("*.docx"))
     if have_data and not config.SHAREPOINT_REFRESH:
         log.info("Input data already present at %s; skipping download.", root)
-        return
+        return InputStore(from_disk=True)
     try:
         root.mkdir(parents=True, exist_ok=True)
         n = _download_tree(base, base, root)
         log.info("Downloaded %d input file(s) from SharePoint '%s' to %s.", n, base, root)
     except sp.SharePointError as e:
         log.warning("SharePoint download failed (%s); using existing local data.", e)
+    return InputStore(from_disk=True)

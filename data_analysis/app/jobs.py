@@ -24,10 +24,11 @@ from models import available_adapters
 from models.base import CodingRequest
 from pipeline import storage
 from pipeline.agreement import match_codes, per_code_kappa
-from pipeline.ground_truth import load_ground_truth_counts
-from pipeline.interviews import load_interviews, merge_documents, select_sample
+from pipeline.interviews import merge_documents, select_sample
 from pipeline.matrices import build_count_matrix, majority_vote
+from . import state_sync
 from .definitions import DefinitionStore
+from .inputs import InputStore
 
 MAJORITY = "majority_vote"
 FEED_LIMIT = 5  # most-recent hits returned to the UI
@@ -127,18 +128,20 @@ def status(job_id: str) -> dict | None:
 
 # --- runner -----------------------------------------------------------------
 
-def start_reanalyze(store: DefinitionStore, codes: list[str], scope: str) -> str:
+def start_reanalyze(store: DefinitionStore, inputs: InputStore,
+                    codes: list[str], scope: str) -> str:
     _ensure_tables()
     job_id = uuid.uuid4().hex[:12]
     adapters = available_adapters()
     if scope != "all":
         adapters = adapters[:1]
     _create_job(job_id, "reanalyze", total=len(adapters) * len(codes), scope=scope)
-    threading.Thread(target=_run, args=(job_id, store, codes, scope), daemon=True).start()
+    threading.Thread(target=_run, args=(job_id, store, inputs, codes, scope), daemon=True).start()
     return job_id
 
 
-def _run(job_id: str, store: DefinitionStore, codes: list[str], scope: str) -> None:
+def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
+         codes: list[str], scope: str) -> None:
     try:
         adapters = available_adapters()
         if not adapters:
@@ -152,11 +155,10 @@ def _run(job_id: str, store: DefinitionStore, codes: list[str], scope: str) -> N
             row = store.current(code)
             defs[code] = row["definition"] if row else ""
 
-        sample = select_sample(load_interviews(config.INTERVIEWS_DIR))
+        sample = select_sample(inputs.interviews())
         titles = [iv.title for iv in sample]
         merged = merge_documents(sample)
-        gt_counts, gt_keys = load_ground_truth_counts(
-            config.GROUND_TRUTH_COUNTS_PATH, config.GROUND_TRUTH_COUNTS_SHEET)
+        gt_counts, gt_keys = inputs.ground_truth_counts()
         doc_pairs = [(iv.title, iv.key) for iv in sample if iv.key in gt_keys]
         code_to_gt = match_codes(codes, list(gt_counts))
 
@@ -206,6 +208,10 @@ def _run(job_id: str, store: DefinitionStore, codes: list[str], scope: str) -> N
             new = _clean(model_kappa[headline].get(code))
             store.record_kappa(code, new, headline)
             results.append({"code": code, "previous_kappa": _clean(prev), "new_kappa": new})
+
+        # Persist the completed re-analysis to SharePoint (RAM-only durability).
+        if config.MEMORY_DB:
+            state_sync.push_state()
 
         _update_job(job_id, status="done", message="Complete",
                     eta_seconds=0, results_json=json.dumps(results))

@@ -9,6 +9,7 @@ filenames.
 
 from __future__ import annotations
 
+import io
 import re
 from pathlib import Path
 
@@ -40,7 +41,19 @@ def load_ground_truth_counts(
     ``counts[code_name][doc_key]`` = human count.
     ``doc_keys`` is the ordered list of document keys (matrix columns).
     """
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    return _counts_from_wb(
+        openpyxl.load_workbook(path, data_only=True, read_only=True), sheet)
+
+
+def load_ground_truth_counts_bytes(
+    data: bytes, sheet: str
+) -> tuple[dict[str, dict[str, int]], list[str]]:
+    """Same as :func:`load_ground_truth_counts` but from in-memory bytes."""
+    return _counts_from_wb(
+        openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True), sheet)
+
+
+def _counts_from_wb(wb, sheet: str):
     ws = wb[sheet]
     rows = list(ws.iter_rows(values_only=True))
     wb.close()

@@ -62,6 +62,24 @@ SHAREPOINT_DIR = os.getenv("AICODE_SHAREPOINT_DIR", "Test Data")
 # Re-download from SharePoint on every boot even if data is already cached.
 SHAREPOINT_REFRESH = str(os.getenv("AICODE_SP_REFRESH", "")).lower() in {"1", "true", "yes"}
 
+# --- RAM-only / SharePoint-authoritative state (data-privacy: minimise on Render) --
+# When AICODE_MEMORY_DB is set, the results DB lives ONLY in process memory
+# (shared-cache SQLite) and the sole durable copy is in SharePoint. Nothing is
+# written to the container filesystem. See app/state_sync.py.
+MEMORY_DB = str(os.getenv("AICODE_MEMORY_DB", "")).lower() in {"1", "true", "yes"}
+# Shared-cache in-memory URI: every db.connect() in this process reaches the same
+# database, and an anchor connection keeps it alive (see db.py).
+MEMORY_DB_URI = "file:aicode_state?mode=memory&cache=shared"
+
+# SharePoint layout for the authoritative operational state + readable mirror.
+SHAREPOINT_STATE_DIR = os.getenv("AICODE_SHAREPOINT_STATE_DIR", f"{SHAREPOINT_DIR}/state")
+SHAREPOINT_DB_NAME = os.getenv("AICODE_SHAREPOINT_DB_NAME", "coding.sqlite")
+SHAREPOINT_CSV_SUBDIR = os.getenv("AICODE_SHAREPOINT_CSV_SUBDIR", "csv")
+# Legacy seed DB (the pre-RAM-only analysis DB). On the first memory-mode boot,
+# if state/coding.sqlite doesn't exist yet we hydrate from this so existing
+# analysis results are carried forward (then state/coding.sqlite is created).
+SHAREPOINT_SEED_NAME = os.getenv("AICODE_SHAREPOINT_SEED_NAME", "coding_seed.sqlite")
+
 # Codebook (Code / Freq / Definition across dimension sheets). Subject to change.
 CODEBOOK_PATH = _path_env("AICODE_CODEBOOK", TEMPLATE_ROOT / "Codebook.xlsx")
 
@@ -81,10 +99,14 @@ GROUND_TRUTH_QUOTES_PATH = _path_env(
 # Outputs / persistent store (live under DATA_DIR so they survive restarts).
 OUTPUT_DIR = _path_env("AICODE_OUTPUT_DIR", DATA_DIR / "outputs")
 # SQLite path: DATABASE_PATH is the canonical Render knob; AICODE_DB kept for
-# back-compat. Defaults to <DATA_DIR>/coding.sqlite.
-DB_PATH = _path_env(
-    "DATABASE_PATH", _path_env("AICODE_DB", DATA_DIR / "coding.sqlite")
-)
+# back-compat. Defaults to <DATA_DIR>/coding.sqlite. In memory mode the "path"
+# is the shared-cache in-memory URI (a str, never a filesystem path).
+if MEMORY_DB:
+    DB_PATH = MEMORY_DB_URI
+else:
+    DB_PATH = _path_env(
+        "DATABASE_PATH", _path_env("AICODE_DB", DATA_DIR / "coding.sqlite")
+    )
 # Per-connection SQLite busy timeout (ms) for safe concurrent access.
 SQLITE_BUSY_TIMEOUT_MS = int(os.getenv("AICODE_SQLITE_BUSY_TIMEOUT_MS", "10000"))
 
@@ -140,6 +162,10 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-insecure-change-me")
 
 
 def ensure_output_dir() -> Path:
+    # In memory mode nothing is written to disk: no output dir, no DB parent
+    # (DB_PATH is an in-memory URI, not a filesystem path).
+    if MEMORY_DB:
+        return OUTPUT_DIR
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     return OUTPUT_DIR

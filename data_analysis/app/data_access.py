@@ -14,11 +14,8 @@ import sqlite3
 from difflib import get_close_matches
 from functools import lru_cache
 
-import openpyxl
-
 import config
-from pipeline.codebook import load_codebook
-from pipeline.interviews import load_interviews
+from .inputs import InputStore
 from .quotes import build_norm, locate, merge_overlaps
 
 MAJORITY = "majority_vote"
@@ -35,10 +32,11 @@ def code_color(code_name: str) -> str:
 
 
 class DataStore:
-    def __init__(self) -> None:
+    def __init__(self, inputs: InputStore) -> None:
         self.db_path = str(config.DB_PATH)
-        self._interviews = {iv.title: iv.text for iv in load_interviews(config.INTERVIEWS_DIR)}
-        self._codes = load_codebook(config.CODEBOOK_PATH)  # base defs (overridden by store)
+        self._inputs = inputs
+        self._interviews = {iv.title: iv.text for iv in inputs.interviews()}
+        self._codes = inputs.codebook()  # base defs (overridden by store)
         self._gt_quotes = self._load_ground_truth_quotes()
         # Cache normalized transcript per doc (built once, reused by locate()).
         self._norm: dict[str, tuple[str, list[int]]] = {
@@ -164,7 +162,7 @@ class DataStore:
     # --- ground truth ------------------------------------------------------
     def _load_ground_truth_quotes(self) -> dict[str, list[str]]:
         """Map code name -> list of human-coded quote strings (from Ground Truth.xlsx)."""
-        wb = openpyxl.load_workbook(config.GROUND_TRUTH_QUOTES_PATH, data_only=True, read_only=True)
+        wb = self._inputs.ground_truth_quotes_workbook()
         code_names = [c.name for c in self._codes]
         norm_to_code = {_norm(n): n for n in code_names}
         result: dict[str, list[str]] = {}

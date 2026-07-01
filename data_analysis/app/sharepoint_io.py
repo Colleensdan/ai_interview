@@ -28,6 +28,15 @@ class SharePointError(RuntimeError):
     pass
 
 
+class PreconditionFailed(SharePointError):
+    """Upload rejected because the remote item changed since we read it.
+
+    Raised on HTTP 412 when an ``If-Match`` ETag no longer matches — i.e. another
+    writer/instance updated the blob. Callers should re-hydrate and retry rather
+    than blindly overwrite (which would clobber the other writer's changes).
+    """
+
+
 def _must_env(name: str) -> str:
     v = os.getenv(name)
     if not v:
@@ -97,19 +106,32 @@ def _headers() -> tuple[str, dict]:
 
 # --- write ------------------------------------------------------------------
 
-def upload_bytes(remote_path: str, content: bytes) -> None:
-    """Upload *content* to drive-root-relative *remote_path* (folders auto-created)."""
+def upload_bytes(remote_path: str, content: bytes, if_match: str | None = None) -> str | None:
+    """Upload *content* to drive-root-relative *remote_path* (folders auto-created).
+
+    If ``if_match`` (an ETag) is given, the PUT carries an ``If-Match`` header so
+    the write only succeeds when the remote item is unchanged since that ETag;
+    otherwise Graph returns 412 and we raise :class:`PreconditionFailed`. Passing
+    ``if_match="*"`` requires the item to already exist. Returns the new ETag of
+    the uploaded item (or ``None`` if Graph didn't report one).
+    """
     drive_id, headers = _headers()
     path = remote_path.strip("/")
     url = f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/content"
-    r = requests.put(
-        url,
-        headers={**headers, "Content-Type": "application/octet-stream"},
-        data=content,
-        timeout=120,
-    )
+    put_headers = {**headers, "Content-Type": "application/octet-stream"}
+    if if_match:
+        put_headers["If-Match"] = if_match
+    r = requests.put(url, headers=put_headers, data=content, timeout=120)
+    if r.status_code == 412:
+        raise PreconditionFailed(
+            f"Upload of '{remote_path}' precondition failed (412): remote changed "
+            f"since ETag {if_match!r}")
     if r.status_code >= 400:
         raise SharePointError(f"Upload of '{remote_path}' failed ({r.status_code}): {r.text}")
+    try:
+        return r.json().get("eTag")
+    except ValueError:
+        return None
 
 
 # --- read -------------------------------------------------------------------
@@ -150,8 +172,43 @@ def download_bytes(remote_path: str) -> bytes:
     return r.content
 
 
+def etag(remote_path: str) -> str | None:
+    """Current ETag of a drive item, or None if it doesn't exist.
+
+    Used for optimistic-concurrency writes: capture the ETag when we read the
+    blob, then pass it as ``if_match`` on the next upload.
+    """
+    drive_id, headers = _headers()
+    path = remote_path.strip("/")
+    r = requests.get(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers=headers, timeout=30)
+    if r.status_code == 404:
+        return None
+    if r.status_code >= 400:
+        raise SharePointError(f"Stat of '{remote_path}' failed ({r.status_code}): {r.text}")
+    return r.json().get("eTag")
+
+
+def download_with_etag(remote_path: str) -> tuple[bytes, str | None]:
+    """Download bytes and the item's current ETag together.
+
+    Returns ``(content, etag)``. The ETag is read from item metadata so it
+    matches what Graph checks on an ``If-Match`` upload.
+    """
+    tag = etag(remote_path)
+    return download_bytes(remote_path), tag
+
+
 def exists(remote_path: str) -> bool:
     drive_id, headers = _headers()
     path = remote_path.strip("/")
     r = requests.get(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers=headers, timeout=30)
     return r.status_code < 400
+
+
+def delete(remote_path: str) -> None:
+    """Delete a drive item (file or folder). No-op if it doesn't exist."""
+    drive_id, headers = _headers()
+    path = remote_path.strip("/")
+    r = requests.delete(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers=headers, timeout=30)
+    if r.status_code not in (204, 404):
+        raise SharePointError(f"Delete of '{remote_path}' failed ({r.status_code}): {r.text}")

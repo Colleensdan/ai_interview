@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,16 @@ def load_codebook(path: str | Path) -> list[Code]:
     Expects a header row with columns Code, Freq, Definition (Freq is ignored).
     Robust to extra/blank rows and to the columns being in any order.
     """
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    return _load_codebook_wb(openpyxl.load_workbook(path, data_only=True, read_only=True))
+
+
+def load_codebook_bytes(data: bytes) -> list[Code]:
+    """Same as :func:`load_codebook` but from in-memory bytes (RAM-only mode)."""
+    return _load_codebook_wb(
+        openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True))
+
+
+def _load_codebook_wb(wb) -> list[Code]:
     codes: list[Code] = []
     for sheet in wb.sheetnames:
         ws = wb[sheet]

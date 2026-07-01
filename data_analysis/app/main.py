@@ -20,9 +20,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 import config
-from . import jobs, startup_sync
+from pipeline import storage
+from . import jobs, startup_sync, state_sync
 from .data_access import DataStore
 from .definitions import DefinitionStore
+from .inputs import InputStore
 
 logging.basicConfig(level=logging.INFO)
 
@@ -36,6 +38,7 @@ app = FastAPI(title="Codebook Improvement App")
 
 _data: DataStore | None = None
 _defs: DefinitionStore | None = None
+_inputs: InputStore | None = None
 
 
 def data() -> DataStore:
@@ -46,6 +49,11 @@ def data() -> DataStore:
 def defs() -> DefinitionStore:
     assert _defs is not None
     return _defs
+
+
+def inputs() -> InputStore:
+    assert _inputs is not None
+    return _inputs
 
 
 # --- auth -------------------------------------------------------------------
@@ -75,10 +83,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup() -> None:
-    global _data, _defs
+    global _data, _defs, _inputs
     config.ensure_output_dir()
-    startup_sync.sync()  # pull input data + seed DB from SharePoint (graceful)
-    _data = DataStore()
+    _inputs = startup_sync.sync()  # pull inputs (+ hydrate DB in memory mode)
+    # Ensure the results schema exists (idempotent). In memory mode a fresh boot
+    # with no prior SharePoint blob starts with an empty DB that still needs the
+    # kappa / coding_results tables the read paths query.
+    storage.init_db(config.DB_PATH).close()
+    _data = DataStore(_inputs)
     _defs = DefinitionStore(config.DB_PATH)
     baseline_model = _data.default_model()
     _defs.seed(
@@ -86,6 +98,10 @@ def _startup() -> None:
         _data.latest_kappa(baseline_model),
         baseline_model,
     )
+    # Memory mode: persist the (possibly newly-seeded) baseline so SharePoint has
+    # a durable copy from the very first boot.
+    if config.MEMORY_DB:
+        state_sync.push_state()
     if not (config.AUTH_USERNAME and config.AUTH_PASSWORD):
         logging.getLogger("app").warning(
             "AUTH_USERNAME/AUTH_PASSWORD not set — login will reject all users.")
@@ -198,7 +214,12 @@ class DefinitionUpdate(BaseModel):
 def api_save_definition(body: DefinitionUpdate):
     if not body.definition.strip():
         raise HTTPException(400, "Definition cannot be empty.")
-    return defs().save_new(body.code, body.definition.strip())
+    result = defs().save_new(body.code, body.definition.strip())
+    # Flush the edit to SharePoint synchronously so it's durable before we return
+    # (RAM-only: nothing on this instance survives a restart).
+    if config.MEMORY_DB:
+        state_sync.push_state()
+    return result
 
 
 class ReanalyzeRequest(BaseModel):
@@ -210,7 +231,7 @@ class ReanalyzeRequest(BaseModel):
 def api_reanalyze(body: ReanalyzeRequest):
     if not body.codes:
         raise HTTPException(400, "No codes selected.")
-    job_id = jobs.start_reanalyze(defs(), body.codes, body.scope)
+    job_id = jobs.start_reanalyze(defs(), inputs(), body.codes, body.scope)
     return {"job_id": job_id}
 
 

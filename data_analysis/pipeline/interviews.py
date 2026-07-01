@@ -7,6 +7,7 @@ can later point at processed/translated SharePoint data. ``.Identifier`` /
 
 from __future__ import annotations
 
+import io
 import random
 import re
 from dataclasses import dataclass
@@ -39,9 +40,18 @@ def _is_ignored(name: str) -> bool:
     return any(name.endswith(suf) for suf in config.IGNORE_SUFFIXES)
 
 
-def _read_docx(path: Path) -> str:
-    document = docx.Document(str(path))
+def _read_docx(source) -> str:
+    """Extract transcript text from a .docx path OR an in-memory file-like/bytes."""
+    if isinstance(source, (bytes, bytearray)):
+        source = io.BytesIO(source)
+    elif isinstance(source, Path):
+        source = str(source)
+    document = docx.Document(source)
     return "\n".join(p.text for p in document.paragraphs if p.text.strip())
+
+
+def _interview_from(name: str, source) -> Interview:
+    return Interview(title=name, key=_doc_key(name), text=_read_docx(source))
 
 
 def load_interviews(directory: str | Path) -> list[Interview]:
@@ -53,13 +63,22 @@ def load_interviews(directory: str | Path) -> list[Interview]:
             continue
         if path.suffix.lower() != ".docx":
             continue
-        interviews.append(
-            Interview(
-                title=path.name,
-                key=_doc_key(path.name),
-                text=_read_docx(path),
-            )
-        )
+        interviews.append(_interview_from(path.name, path))
+    return interviews
+
+
+def load_interviews_from_files(files: dict[str, bytes]) -> list[Interview]:
+    """Load transcripts from an in-memory {filename: bytes} map (RAM-only mode).
+
+    Same selection rules as :func:`load_interviews` — sorted by filename,
+    ``.Identifier`` sidecars and non-.docx entries ignored — but nothing is read
+    from disk.
+    """
+    interviews: list[Interview] = []
+    for name in sorted(files):
+        if _is_ignored(name) or not name.lower().endswith(".docx"):
+            continue
+        interviews.append(_interview_from(name, files[name]))
     return interviews
 
 

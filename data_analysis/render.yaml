@@ -1,33 +1,34 @@
 # Render deployment for the Task 2 codebook-improvement app.
-# Single web service (in-process background jobs) + a persistent disk at
-# /var/data holding the SQLite DB and CSV outputs. No separate worker / Redis:
-# the persistent disk pins this to a single instance, which keeps the in-process
-# job state consistent (see DEPLOY.md).
+#
+# RAM-only / data-privacy: NO data is written to the container filesystem. The
+# results DB lives only in process memory (AICODE_MEMORY_DB) and the single
+# durable copy is in SharePoint (state/coding.sqlite + a readable state/csv
+# mirror), hydrated at boot and flushed on every write by app/state_sync.py.
+#
+# IMPORTANT: exactly one instance. The old persistent disk implicitly pinned the
+# service to a single instance; with the disk gone we pin it explicitly
+# (numInstances: 1, no autoscaling) so two instances can never flush the shared
+# blob concurrently. Prefer a recreate deploy over overlapping rolling deploys.
+#
+# PREREQUISITE: the Azure app registration must have Files.ReadWrite.All /
+# Sites.ReadWrite.All (application) + admin consent, or write-back returns 403
+# and the app degrades to read-only (see upload_test_data.py's 403 hint).
 services:
   - type: web
     name: codebook-improvement
     runtime: python
-    plan: starter                 # required: persistent disks need a paid instance
+    plan: starter
     rootDir: data_analysis        # the service runs from data_analysis/
+    numInstances: 1               # single instance — see header note
     buildCommand: pip install -r requirements.txt
     # python -m guarantees the cwd is on sys.path (for `config`, `db`, `app`).
-    # --workers 1 so the in-memory job thread + polling stay consistent.
+    # --workers 1 so the in-memory DB + job thread stay in one process.
     startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /healthz
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
-      # --- persistence (point everything at the mounted disk) ---
-      - key: DATA_DIR
-        value: /var/data
-      - key: DATABASE_PATH
-        value: /var/data/coding.sqlite
-      - key: AICODE_OUTPUT_DIR
-        value: /var/data/outputs
-      - key: AICODE_DATA_ROOT          # SharePoint data is synced here on boot
-        value: /var/data/input
+      # --- RAM-only: DB in memory, SharePoint is the durable store ---
+      - key: AICODE_MEMORY_DB
+        value: "1"
       # --- SharePoint source folder (configurable, not hardcoded) ---
       - key: AICODE_SHAREPOINT_DIR
         value: Test Data
