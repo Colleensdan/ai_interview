@@ -29,20 +29,33 @@ Non-secret (already in `render.yaml`, override if needed):
 
 | Var | Value |
 |-----|-------|
-| `DATA_DIR` | `/var/data` |
-| `DATABASE_PATH` | `/var/data/coding.sqlite` |
-| `AICODE_OUTPUT_DIR` | `/var/data/outputs` |
-| `AICODE_DATA_ROOT` | `/var/data/input` |
+| `AICODE_MEMORY_DB` | `1` — **required**, see below |
 | `AICODE_SHAREPOINT_DIR` | the input folder in SharePoint |
 | `AICODE_SHAREPOINT_STATE_DIR` | **set this explicitly** — see below |
 | `CJBS_DEPLOYMENT_NAME` | `gpt-5-mini` (pinned — not a secret; keep it matching the data) |
 | `PYTHON_VERSION` | `3.13.4` |
+
+> **`AICODE_MEMORY_DB=1` is not optional.** Without it the app takes the
+> on-disk path, downloads every transcript onto Render's filesystem, and looks
+> for the results DB on a persistent disk — which was removed with the RAM-only
+> change. The startup log tells you which path ran: "Loaded N input file(s) …
+> into memory" is correct; "Downloaded N input file(s) … to \<path\>" means the
+> interview data has just been written to Render's disk.
 
 > **Set both SharePoint variables when you change data sets.**
 > `AICODE_SHAREPOINT_STATE_DIR` defaults to `<AICODE_SHAREPOINT_DIR>/state`, so
 > repointing only the input folder silently relocates the authoritative results
 > database too — the app then boots against an empty state and every kappa
 > disappears. Setting both makes the two independent and explicit.
+
+> **Do not set `DATA_DIR`, `DATABASE_PATH`, `AICODE_OUTPUT_DIR`,
+> `AICODE_DATA_ROOT` or `AICODE_INTERVIEWS_DIR`.** They are leftovers from the
+> persistent-disk era and every one of them names a `/var/data` path that no
+> longer exists. `AICODE_INTERVIEWS_DIR` is the dangerous one: in RAM-only mode
+> inputs are routed by the transcript folder's *name* (`All chats`), which the
+> default already ends with, so an override buys nothing — but if memory mode is
+> ever off, a `/var/data` value crashes startup with `FileNotFoundError`.
+> Delete them from the dashboard if they are set.
 
 Secrets (set as `sync:false` — **never committed**):
 

@@ -38,10 +38,12 @@ services:
         value: AI-Interviewer-Data
       - key: AICODE_SHAREPOINT_STATE_DIR
         value: AI-Interviewer-Data/state
-      # Transcript folder name inside that SharePoint folder. In RAM-only mode
-      # only the final path component is used, to route downloaded files.
-      - key: AICODE_INTERVIEWS_DIR
-        value: /var/data/input/All chats
+      # AICODE_DATA_ROOT / AICODE_INTERVIEWS_DIR are deliberately NOT set.
+      # In RAM-only mode nothing is written to the filesystem, and inputs are
+      # routed by the transcript folder's NAME ("All chats"), which the default
+      # already ends with. Pointing them at /var/data would be worse than
+      # useless: that disk was removed with the RAM-only change, so the path
+      # does not exist and startup fails with FileNotFoundError.
       # Deployment name is not a secret — pin it so the live model matches the
       # data and isn't accidentally changed in the dashboard.
       - key: CJBS_DEPLOYMENT_NAME
