@@ -272,7 +272,8 @@ def _upload_kappa_csv(conn) -> None:
                     r["n_documents"], r["n_human_present"], r["n_llm_present"], meets))
     data = _rows_to_csv(
         ["Model", "Code", "Cohen's kappa", "n_documents",
-         "n_human_present", "n_llm_present", "meets_target_>0.80"], out)
+         "n_human_present", "n_llm_present",
+         f"meets_target_>{config.KAPPA_TARGET:g}"], out)
     sp.upload_bytes(_csv_remote("kappa.csv"), data)
 
 
