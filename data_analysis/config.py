@@ -49,12 +49,23 @@ DATA_DIR = _resolve_data_dir()
 # --- Data locations (all flagged as TBD / subject to change in the spec) -----
 # Root of the input data set (interviews + codebook + ground truth). On Render
 # this is populated from SharePoint at startup (set AICODE_DATA_ROOT=/var/data/input).
-TEMPLATE_ROOT = _path_env(
-    "AICODE_DATA_ROOT", HERE / "Documents AI coding examples"
+# Defaults to the real study data; the original template set is still on disk at
+# "Documents AI coding examples" and can be selected with AICODE_DATA_ROOT.
+TEMPLATE_ROOT = _path_env("AICODE_DATA_ROOT", HERE / "data")
+
+# Interview transcripts. The real export nests them one level deeper
+# ("All chats/All chats"); the directory is searched recursively either way.
+INTERVIEWS_DIR = _path_env(
+    "AICODE_INTERVIEWS_DIR", TEMPLATE_ROOT / "All chats" / "All chats"
 )
 
-# Interview transcripts (.docx).
-INTERVIEWS_DIR = _path_env("AICODE_INTERVIEWS_DIR", TEMPLATE_ROOT / "Interviews")
+# Transcript file types to load. The template set is .docx (python-docx); the
+# real chat export is plain .txt with "assistant:"/"user:" turn prefixes.
+TRANSCRIPT_EXTS = tuple(
+    s.strip().lower() for s in
+    os.getenv("AICODE_TRANSCRIPT_EXTS", ".txt,.docx").split(",")
+    if s.strip()
+)
 
 # SharePoint source directory — configurable, NOT hardcoded (spec 1). The app
 # downloads this folder's contents into TEMPLATE_ROOT at startup.
@@ -80,21 +91,47 @@ SHAREPOINT_CSV_SUBDIR = os.getenv("AICODE_SHAREPOINT_CSV_SUBDIR", "csv")
 # analysis results are carried forward (then state/coding.sqlite is created).
 SHAREPOINT_SEED_NAME = os.getenv("AICODE_SHAREPOINT_SEED_NAME", "coding_seed.sqlite")
 
-# Codebook (Code / Freq / Definition across dimension sheets). Subject to change.
+# Codebook. One row per code; the definition column is headed "Definition" in
+# the template export and "Comment" in the ATLAS.ti one (both accepted).
 CODEBOOK_PATH = _path_env("AICODE_CODEBOOK", TEMPLATE_ROOT / "Codebook.xlsx")
 
 # Human ground-truth code x document counts (ATLAS.ti export, the "Code
-# Transcript Table" format the spec references).
+# Transcript Table" format the spec references). Named CountData.xlsx in the
+# template export, Counts.xlsx in the real one.
 GROUND_TRUTH_COUNTS_PATH = _path_env(
-    "AICODE_GROUND_TRUTH", TEMPLATE_ROOT / "CountData.xlsx"
+    "AICODE_GROUND_TRUTH", TEMPLATE_ROOT / "Counts.xlsx"
 )
 GROUND_TRUTH_COUNTS_SHEET = os.getenv("AICODE_GT_SHEET", "CodeDocumentTable")
 
 # Human ground-truth quotes (one sheet per code) — used by the Task 2 app to
-# highlight human-coded passages inside transcripts.
+# highlight human-coded passages inside transcripts. "Ground Truth.xlsx" in the
+# template export, "Quotations.xlsx" in the real one.
 GROUND_TRUTH_QUOTES_PATH = _path_env(
-    "AICODE_GROUND_TRUTH_QUOTES", TEMPLATE_ROOT / "Ground Truth.xlsx"
+    "AICODE_GROUND_TRUTH_QUOTES", TEMPLATE_ROOT / "Quotations.xlsx"
 )
+
+# Sheets in the quotes workbook that are not codes (ATLAS.ti adds a metadata
+# sheet to every export).
+NON_CODE_SHEETS = {
+    s.strip().lower() for s in
+    os.getenv("AICODE_NON_CODE_SHEETS", "Info").split(",")
+    if s.strip()
+}
+
+# Codes to exclude from LLM coding and from kappa. These describe the chatbot's
+# own behaviour rather than anything the participant said, so they are not a
+# meaningful test of the codebook: "finished" marks the assistant's closing turn
+# (every one of its ground-truth quotes is an assistant turn, which the
+# interviewee-only rule below forbids the model from coding, so it can never be
+# found), "summary" marks the assistant's summary, and "summary: N" records the
+# participant's 1-5 rating of it.
+EXCLUDED_CODES = [
+    s.strip() for s in os.getenv(
+        "AICODE_EXCLUDED_CODES",
+        "finished,summary,summary: 1,summary: 2,summary: 3,summary: 4",
+    ).split(",")
+    if s.strip()
+]
 
 # Outputs / persistent store (live under DATA_DIR so they survive restarts).
 OUTPUT_DIR = _path_env("AICODE_OUTPUT_DIR", DATA_DIR / "outputs")
@@ -133,9 +170,17 @@ INTERVIEWER_LABELS = [
 
 # --- Sampling ----------------------------------------------------------------
 # Fraction of ground-truth transcripts to code, and a fixed seed so a run is
-# reproducible (the same 50% is selected each time unless the seed changes).
-SAMPLE_FRACTION = float(os.getenv("AICODE_SAMPLE_FRACTION", "0.5"))
+# reproducible (the same subset is selected each time unless the seed changes).
+# Spec 4.1 says 50%, which existed to limit spend on the 14 long template
+# interviews. The real chats are short — the whole corpus is ~65k tokens — so we
+# code all of them, which roughly halves the standard error on every kappa.
+SAMPLE_FRACTION = float(os.getenv("AICODE_SAMPLE_FRACTION", "1.0"))
 RANDOM_SEED = int(os.getenv("AICODE_SEED", "42"))
+
+# Abort rather than quietly scoring kappa on a truncated document set: if more
+# than this fraction of sampled transcripts fail to join to a ground-truth
+# column, something is wrong with the inputs, not with the data.
+MAX_DOC_LOSS_FRACTION = float(os.getenv("AICODE_MAX_DOC_LOSS", "0.05"))
 
 # --- Azure OpenAI (live model) ----------------------------------------------
 # Mirrors code/interview.py and code/bench_llm.py exactly.
@@ -151,8 +196,18 @@ MAX_OUTPUT_TOKENS = int(os.getenv("AICODE_MAX_OUTPUT_TOKENS", "16384"))
 # Per-request timeout (seconds) so a single hung call can't stall the run.
 REQUEST_TIMEOUT = float(os.getenv("AICODE_REQUEST_TIMEOUT", "180"))
 
+# --- Call batching -----------------------------------------------------------
+# Documents per model call. MAX_OUTPUT_TOKENS is shared with the model's
+# reasoning tokens, so a frequent code across a large corpus will truncate if
+# every document goes in one prompt — and a truncated response is
+# indistinguishable from "code not present". Batching bounds the answer size.
+DOCS_PER_CALL = int(os.getenv("AICODE_DOCS_PER_CALL", "25"))
+# Batches within a single code may run concurrently; codes stay sequential
+# (spec 4.2: "process one code at a time").
+MAX_CONCURRENT_CALLS = int(os.getenv("AICODE_MAX_CONCURRENCY", "4"))
+
 # Cohen's kappa target (spec 4.8).
-KAPPA_TARGET = 0.80
+KAPPA_TARGET = float(os.getenv("AICODE_KAPPA_TARGET", "0.80"))
 
 # --- Auth (Task 2 app) -------------------------------------------------------
 AUTH_USERNAME = os.getenv("AUTH_USERNAME")

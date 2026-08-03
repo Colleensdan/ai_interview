@@ -1,8 +1,10 @@
 """Read interview transcripts, select a sample, and merge into one document.
 
-Transcripts are .docx today (local). The source directory is configurable so it
-can later point at processed/translated SharePoint data. ``.Identifier`` /
-``:Zone.Identifier`` sidecar files are always ignored.
+Two transcript formats are supported: ``.docx`` (the template interviews, read
+via python-docx) and ``.txt`` (the chat export, whose turns are prefixed
+``assistant:`` / ``user:``). The source directory is configurable and searched
+recursively, so it can point at processed/translated SharePoint data whatever
+its nesting. ``.Identifier`` / ``:Zone.Identifier`` sidecars are always ignored.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ class Interview:
     text: str
 
 
-def _doc_key(filename: str) -> str:
+def doc_key(filename: str) -> str:
     """Canonical document key = leading digits of the filename.
 
     Joins LLM output (keyed by filename) with the human ground-truth matrix
@@ -40,6 +42,10 @@ def _is_ignored(name: str) -> bool:
     return any(name.endswith(suf) for suf in config.IGNORE_SUFFIXES)
 
 
+class NoTranscriptsError(RuntimeError):
+    """No transcripts could be loaded from the configured source."""
+
+
 def _read_docx(source) -> str:
     """Extract transcript text from a .docx path OR an in-memory file-like/bytes."""
     if isinstance(source, (bytes, bytearray)):
@@ -50,50 +56,88 @@ def _read_docx(source) -> str:
     return "\n".join(p.text for p in document.paragraphs if p.text.strip())
 
 
+def _read_txt(source) -> str:
+    """Read a plain-text transcript, verbatim.
+
+    Text is deliberately not reflowed or stripped beyond trailing whitespace:
+    ground-truth quotes are located by matching against this exact string, and
+    turn continuation (a line with no ``role:`` prefix belongs to the previous
+    speaker) is handled later by :func:`parse_turns`.
+    """
+    if isinstance(source, (bytes, bytearray)):
+        return bytes(source).decode("utf-8", errors="replace")
+    return Path(source).read_text(encoding="utf-8", errors="replace")
+
+
+def _is_transcript(name: str) -> bool:
+    return (not _is_ignored(name)
+            and name.lower().endswith(tuple(config.TRANSCRIPT_EXTS)))
+
+
+def _read_transcript(name: str, source) -> str:
+    if name.lower().endswith(".docx"):
+        return _read_docx(source)
+    return _read_txt(source)
+
+
 def _interview_from(name: str, source) -> Interview:
-    return Interview(title=name, key=_doc_key(name), text=_read_docx(source))
+    return Interview(
+        title=name, key=doc_key(name), text=_read_transcript(name, source)
+    )
 
 
 def load_interviews(directory: str | Path) -> list[Interview]:
-    """Load all .docx transcripts in *directory* (sorted, .Identifier ignored)."""
+    """Load every transcript under *directory*, recursively.
+
+    Sorted by filename, ``.Identifier`` sidecars ignored. Raises if the
+    directory yields nothing, rather than returning an empty list that would
+    later surface as an obscure sampling error.
+    """
     directory = Path(directory)
-    interviews: list[Interview] = []
-    for path in sorted(directory.iterdir()):
-        if not path.is_file() or _is_ignored(path.name):
-            continue
-        if path.suffix.lower() != ".docx":
-            continue
-        interviews.append(_interview_from(path.name, path))
-    return interviews
+    if not directory.is_dir():
+        raise NoTranscriptsError(f"Transcript directory does not exist: {directory}")
+    paths = [p for p in directory.rglob("*")
+             if p.is_file() and _is_transcript(p.name)]
+    if not paths:
+        raise NoTranscriptsError(
+            f"No transcripts under {directory} matching {config.TRANSCRIPT_EXTS}. "
+            "Check AICODE_INTERVIEWS_DIR and AICODE_TRANSCRIPT_EXTS."
+        )
+    return [_interview_from(p.name, p) for p in sorted(paths, key=lambda p: p.name)]
 
 
 def load_interviews_from_files(files: dict[str, bytes]) -> list[Interview]:
     """Load transcripts from an in-memory {filename: bytes} map (RAM-only mode).
 
     Same selection rules as :func:`load_interviews` — sorted by filename,
-    ``.Identifier`` sidecars and non-.docx entries ignored — but nothing is read
-    from disk.
+    ``.Identifier`` sidecars and unsupported extensions ignored — but nothing is
+    read from disk.
     """
-    interviews: list[Interview] = []
-    for name in sorted(files):
-        if _is_ignored(name) or not name.lower().endswith(".docx"):
-            continue
-        interviews.append(_interview_from(name, files[name]))
-    return interviews
+    names = sorted(n for n in files if _is_transcript(n))
+    if not names:
+        raise NoTranscriptsError(
+            f"No transcripts in the supplied file map matching {config.TRANSCRIPT_EXTS}."
+        )
+    return [_interview_from(n, files[n]) for n in names]
 
 
 def select_sample(
     interviews: list[Interview],
-    fraction: float = config.SAMPLE_FRACTION,
-    seed: int = config.RANDOM_SEED,
+    fraction: float | None = None,
+    seed: int | None = None,
 ) -> list[Interview]:
     """Randomly select ``fraction`` of interviews (seeded, reproducible).
 
-    Rounds to the nearest whole transcript with a floor of 1.
+    Rounds to the nearest whole transcript with a floor of 1. Defaults are read
+    from config at call time, not bound at import, so overriding
+    ``config.SAMPLE_FRACTION`` (e.g. in a test) actually takes effect.
     """
-    n = max(1, round(len(interviews) * fraction))
-    rng = random.Random(seed)
-    chosen = rng.sample(interviews, n)
+    if not interviews:
+        raise NoTranscriptsError("Cannot sample from an empty transcript set.")
+    fraction = config.SAMPLE_FRACTION if fraction is None else fraction
+    seed = config.RANDOM_SEED if seed is None else seed
+    n = min(len(interviews), max(1, round(len(interviews) * fraction)))
+    chosen = interviews if n == len(interviews) else random.Random(seed).sample(interviews, n)
     # Return in stable (title) order for deterministic, readable output.
     return sorted(chosen, key=lambda i: i.title)
 

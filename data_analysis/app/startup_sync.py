@@ -28,7 +28,9 @@ from .inputs import InputStore
 
 log = logging.getLogger("app.startup_sync")
 
-SEED_DB_NAME = "coding_seed.sqlite"
+# Single source for the legacy seed filename; config owns the value so this
+# module and the state-sync layer cannot drift apart.
+SEED_DB_NAME = config.SHAREPOINT_SEED_NAME
 
 
 def _ignored(name: str) -> bool:
@@ -122,7 +124,10 @@ def _sync_disk() -> InputStore:
 
     # 2. Download input data (cache unless refresh requested).
     interviews = Path(config.INTERVIEWS_DIR)
-    have_data = interviews.is_dir() and any(interviews.glob("*.docx"))
+    have_data = interviews.is_dir() and any(
+        p.is_file() and p.name.lower().endswith(tuple(config.TRANSCRIPT_EXTS))
+        for p in interviews.rglob("*")
+    )
     if have_data and not config.SHAREPOINT_REFRESH:
         log.info("Input data already present at %s; skipping download.", root)
         return InputStore(from_disk=True)

@@ -16,9 +16,10 @@ from pipeline.codebook import load_codebook, load_codebook_bytes
 from pipeline.ground_truth import load_ground_truth_counts, load_ground_truth_counts_bytes
 from pipeline.interviews import load_interviews, load_interviews_from_files
 
-TEMPLATE = Path(config.TEMPLATE_ROOT)
+DATA_ROOT = Path(config.TEMPLATE_ROOT)
 pytestmark = pytest.mark.skipif(
-    not TEMPLATE.is_dir(), reason="sample input data not present")
+    not DATA_ROOT.is_dir(),
+    reason=f"input data not present at {DATA_ROOT} (set AICODE_DATA_ROOT)")
 
 
 def test_codebook_bytes_matches_path():
@@ -37,19 +38,22 @@ def test_ground_truth_counts_bytes_matches_path():
 
 def test_interviews_bytes_matches_path():
     from_path = load_interviews(config.INTERVIEWS_DIR)
-    files = {p.name: p.read_bytes() for p in Path(config.INTERVIEWS_DIR).iterdir()
+    files = {p.name: p.read_bytes() for p in Path(config.INTERVIEWS_DIR).rglob("*")
              if p.is_file()}
     from_bytes = load_interviews_from_files(files)
     assert [iv.title for iv in from_bytes] == [iv.title for iv in from_path]
     assert {iv.title: iv.text for iv in from_bytes} == {iv.title: iv.text for iv in from_path}
-    assert len(from_bytes) == 14
+    # Deliberately not a fixed count: the transcript set is study data and
+    # changes. A literal here previously meant repointing at new data made the
+    # test fail for the wrong reason.
+    assert from_bytes, "no transcripts loaded"
 
 
 def test_inputstore_memory_matches_disk_end_to_end():
     disk = InputStore(from_disk=True)
     mem = InputStore(from_disk=False)
     # Populate the memory store by routing every input file, as startup_sync will.
-    base = TEMPLATE
+    base = DATA_ROOT
     for f in base.rglob("*"):
         if f.is_file():
             mem.route(str(f.relative_to(base)), f.read_bytes())

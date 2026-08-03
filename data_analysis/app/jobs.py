@@ -21,10 +21,10 @@ from collections import deque
 import config
 import db as _db
 from models import available_adapters
-from models.base import CodingRequest
+from pipeline.coding import code_across_batches, make_batches
 from pipeline import storage
 from pipeline.agreement import match_codes, per_code_kappa
-from pipeline.interviews import merge_documents, select_sample
+from pipeline.interviews import select_sample
 from pipeline.matrices import build_count_matrix, majority_vote
 from . import state_sync
 from .definitions import DefinitionStore
@@ -157,7 +157,7 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
 
         sample = select_sample(inputs.interviews())
         titles = [iv.title for iv in sample]
-        merged = merge_documents(sample)
+        batches = make_batches(sample)
         gt_counts, gt_keys = inputs.ground_truth_counts()
         doc_pairs = [(iv.title, iv.key) for iv in sample if iv.key in gt_keys]
         code_to_gt = match_codes(codes, list(gt_counts))
@@ -176,7 +176,8 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
             for code in codes:
                 _update_job(job_id, message=f"{adapter.name}: {code}")
                 t0 = time.time()
-                code_hits = adapter.code_one(CodingRequest(code, defs[code], merged, tuple(titles)))
+                code_hits = code_across_batches(
+                    adapter, code, defs[code], batches, note=lambda m: None)
                 hits.extend(code_hits)
                 # Live feed: persist each positive hit (code + quote) as it lands.
                 for h in code_hits:

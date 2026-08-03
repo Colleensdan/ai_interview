@@ -21,7 +21,10 @@ import openpyxl
 
 import config
 from pipeline.codebook import Code, load_codebook, load_codebook_bytes
-from pipeline.ground_truth import load_ground_truth_counts, load_ground_truth_counts_bytes
+from pipeline.ground_truth import (
+    load_ground_truth_table,
+    load_ground_truth_table_bytes,
+)
 from pipeline.interviews import Interview, load_interviews, load_interviews_from_files
 
 
@@ -57,18 +60,19 @@ class InputStore:
         name = Path(rel_path).name
         parts = {p.lower() for p in Path(rel_path).parts}
         interviews_dir = Path(config.INTERVIEWS_DIR).name.lower()
-        if name.lower().endswith(".docx") and interviews_dir in parts:
+        if name.lower().endswith(tuple(config.TRANSCRIPT_EXTS)) and interviews_dir in parts:
             self.put_interview(name, data)
             return True
-        if name == Path(config.CODEBOOK_PATH).name:
-            self.set_codebook(data)
-            return True
-        if name == Path(config.GROUND_TRUTH_COUNTS_PATH).name:
-            self.set_gt_counts(data)
-            return True
-        if name == Path(config.GROUND_TRUTH_QUOTES_PATH).name:
-            self.set_gt_quotes(data)
-            return True
+        # Workbook names differ between exports, so match case-insensitively on
+        # the configured filenames rather than on literals.
+        for configured, setter in (
+            (config.CODEBOOK_PATH, self.set_codebook),
+            (config.GROUND_TRUTH_COUNTS_PATH, self.set_gt_counts),
+            (config.GROUND_TRUTH_QUOTES_PATH, self.set_gt_quotes),
+        ):
+            if name.lower() == Path(configured).name.lower():
+                setter(data)
+                return True
         return False
 
     def has_interviews(self) -> bool:
@@ -88,12 +92,19 @@ class InputStore:
         return load_codebook_bytes(self._codebook)
 
     def ground_truth_counts(self) -> tuple[dict[str, dict[str, int]], list[str]]:
+        table = self.ground_truth_table()
+        return table.counts, table.doc_keys
+
+    def ground_truth_table(self):
+        """Full count matrix, including the ``Gr=`` annotations and the document
+        ordering that quotation IDs are numbered against."""
         if self._from_disk:
-            return load_ground_truth_counts(
+            return load_ground_truth_table(
                 config.GROUND_TRUTH_COUNTS_PATH, config.GROUND_TRUTH_COUNTS_SHEET)
         if self._gt_counts is None:
             raise RuntimeError("Ground-truth counts not loaded into memory.")
-        return load_ground_truth_counts_bytes(self._gt_counts, config.GROUND_TRUTH_COUNTS_SHEET)
+        return load_ground_truth_table_bytes(
+            self._gt_counts, config.GROUND_TRUTH_COUNTS_SHEET)
 
     def ground_truth_quotes_workbook(self):
         """Return an openpyxl (read-only) workbook of the GT quotes file."""

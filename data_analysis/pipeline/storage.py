@@ -12,6 +12,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
+import config
 from .agreement import KappaResult
 from .matrices import Matrix
 from models.base import CodeHit
@@ -145,6 +146,15 @@ def insert_majority_matrix(conn, run_id, matrix, code_names, documents) -> None:
 
 
 def insert_ground_truth_matrix(conn, matrix, code_names, documents) -> None:
+    """Replace the stored human ground truth.
+
+    Unlike the model tables this carries no run_id: it is a snapshot of the
+    input workbook, not a record of one run. Appending would duplicate every
+    row on each re-run (5,824 of them for the current data) and inflate the
+    CSV mirror, so the previous snapshot is cleared first.
+    """
+    conn.execute(
+        "DELETE FROM ground_truth_matrix WHERE source='human_ground_truth'")
     conn.executemany(
         "INSERT INTO ground_truth_matrix (code_name, document, count) "
         "VALUES (?, ?, ?)",
@@ -159,12 +169,13 @@ def write_kappa_csv(path: str | Path, rows: list[tuple[str, KappaResult]]) -> No
     """rows = list of (model, KappaResult)."""
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
+        target = config.KAPPA_TARGET
         w.writerow(
             ["Model", "Code", "Cohen's kappa", "n_documents",
-             "n_human_present", "n_llm_present", "meets_target_>0.80"]
+             "n_human_present", "n_llm_present", f"meets_target_>{target:g}"]
         )
         for model, r in rows:
-            meets = (not _isnan(r.kappa)) and r.kappa > 0.80
+            meets = (not _isnan(r.kappa)) and r.kappa > target
             kappa_out = "" if _isnan(r.kappa) else round(r.kappa, 4)
             w.writerow([model, r.code_name, kappa_out, r.n_documents,
                         r.n_human_present, r.n_llm_present, meets])

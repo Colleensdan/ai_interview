@@ -122,8 +122,17 @@ function renderStart(root) {
       el("div", { class: "lbl" }, `codes below κ ${o.target}  ·  ${o.pct_fail}%`)),
     el("div", { class: "kpi" },
       el("div", { class: "big" }, `${o.total}`),
-      el("div", { class: "lbl" }, `codes total  ·  model: ${esc(o.model)}`)),
+      el("div", { class: "lbl" }, `codes scored  ·  model: ${esc(o.model)}`)),
   ));
+
+  // Codes deliberately not sent to the model. Stated rather than omitted, so
+  // the codebook total and the scored total don't look like a discrepancy.
+  if ((o.excluded || []).length) {
+    wrap.append(el("div", { class: "notice" },
+      `${o.excluded.length} code(s) excluded from coding and κ — they describe `
+      + `the chatbot's own behaviour, not the participant's answers: `
+      + o.excluded.join(", ")));
+  }
 
   const mkCol = (title, items, footer) => {
     const list = el("div", { class: "codelist" });
@@ -295,6 +304,13 @@ function panel(kind, segments, codes, label) {
   const col = el("div", { class: "panel-col" },
     el("div", { class: "panel-head" }, el("span", {}, label), el("span", {}, `${codes.length} code(s)`)));
   const reading = el("div", { class: "reading" });
+  // Codes the humans applied here that the quotes file can't show. Said out
+  // loud so an AI-only highlight isn't misread as the model inventing a code.
+  const unquoted = (S.view.human_codes_unquoted || []);
+  if (kind === "human" && unquoted.length) {
+    reading.append(el("div", { class: "notice" },
+      `Also human-coded here, without quotes to highlight: ${unquoted.join(", ")}`));
+  }
   reading.append(renderSegments(segments, S.view.colors, kind === "ai"));
   col.append(reading);
   const margin = marginEl(codes, kind === "ai" ? "left" : "right", kind === "ai" ? "AI" : "Human");

@@ -120,6 +120,12 @@ main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: 
   font-size: 16.5px; white-space: pre-wrap; word-break: break-word;
 }
 .panel-head { padding: 8px 14px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); border-bottom: 1px solid var(--line); background: #fff; display: flex; justify-content: space-between; }
+/* Human-coded codes with no quotes to highlight (see human_codes_unquoted). */
+.notice {
+  margin: -8px 0 18px; padding: 9px 12px; border-radius: 6px;
+  background: #fff8e1; border: 1px solid #f0d98a; color: #6b5314;
+  font-size: 13.5px; line-height: 1.5; white-space: normal;
+}
 .panel-col { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .panel.human .panel-col { order: 1; }
 

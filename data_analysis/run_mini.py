@@ -14,8 +14,8 @@ import argparse
 
 import config
 from models import available_adapters
-from models.base import CodingRequest
 from pipeline.codebook import load_codebook
+from pipeline.coding import code_batch
 from pipeline.interviews import load_interviews, merge_documents, select_sample
 
 
@@ -47,13 +47,9 @@ def main() -> None:
         print("=" * 70)
         print(f"CODE: {code.name}")
         print(f"DEFINITION: {code.definition}")
-        req = CodingRequest(
-            code_name=code.name,
-            code_description=code.definition,
-            merged_document=merged,
-            document_titles=tuple(titles),
-        )
-        hits = adapter.code_one(req)
+        # Same path the real run uses, so a truncated response is split and
+        # retried here too rather than looking like "no occurrences".
+        hits = code_batch(adapter, code.name, code.definition, sample)
         print(f"-> {len(hits)} occurrence(s) parsed:")
         for h in hits:
             print(f"   • [{h.document_title}]")

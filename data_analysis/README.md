@@ -16,16 +16,43 @@ models/              Pluggable model adapters.
                      until their API key env var is set.
   __init__.py        Registry: available_adapters() = those with credentials.
 pipeline/
-  codebook.py        Read Code/Definition from Codebook.xlsx (per dimension).
-  interviews.py      Read .docx transcripts, 50% sample, merge into one doc.
-  ground_truth.py    Read human code x document counts (CountData.xlsx).
+  names.py           Canonical code-name handling (bullets, Gr=, ATLAS escapes).
+  codebook.py        Read Code + Definition/Comment from Codebook.xlsx.
+  interviews.py      Read .txt/.docx transcripts (recursive), sample, merge.
+  ground_truth.py    Read human code x document counts (Counts.xlsx).
+  quote_sheets.py    Resolve the quotes workbook: sheet -> code, quote -> doc.
+  coding.py          Run one code over batched documents; halve on truncation.
   matrices.py        Per-model count matrices + cross-model majority vote.
   agreement.py       Per-code Cohen's kappa (binary present/absent).
   storage.py         CSV writers + SQLite schema/inserts.
+  validate_inputs.py Cross-check the four inputs before spending anything.
 run_mini.py          Tiny REAL Azure call (1-2 codes x 1-2 docs) for validation.
 run_pipeline.py      Full end-to-end run.
 outputs/             Generated CSVs + coding.db (SQLite).
 ```
+
+## Input data
+
+Four inputs, all under `AICODE_DATA_ROOT` (default `data/`):
+
+| | file | shape |
+|---|---|---|
+| transcripts | `All chats/All chats/*.txt` | `assistant:` / `user:` turn prefixes; a line with no prefix continues the previous turn |
+| codebook | `Codebook.xlsx` | sheet with `Code` + `Comment` (or `Definition`) |
+| human counts | `Counts.xlsx` | ATLAS.ti `CodeDocumentTable`; `Totals` row/column dropped |
+| human quotes | `Quotations.xlsx` | one sheet per code, `ID` + `Quotation Content` |
+
+Two details are load-bearing. Sheet names in the quotes workbook are truncated
+to 31 characters and stripped of `/`, so distinct codes can collide; they are
+told apart using ATLAS.ti's own `Gr=` quotation counts, never by fuzzy name
+matching. And the quotation `ID` is `<document number>:<quotation number>`,
+where the document numbering is the column order of the count matrix — that is
+what attributes a quote to one transcript rather than to every transcript
+containing the same words.
+
+The earlier template data set (`.docx` interviews, `CountData.xlsx`,
+`Ground Truth.xlsx`) still loads; point `AICODE_DATA_ROOT` at it and set
+`AICODE_GROUND_TRUTH` / `AICODE_GROUND_TRUTH_QUOTES` to those filenames.
 
 ## Configuration
 
@@ -33,18 +60,45 @@ Secrets and the SharePoint config live in `data_analysis/.env` (already present)
 Azure uses `CJBS_API_KEY`, `CJBS_API_ENDPOINT`, `CJBS_API_VERSION`,
 `CJBS_DEPLOYMENT_NAME` — identical to `code/`.
 
-Paths are configurable (defaults point at the template data):
-`AICODE_CODEBOOK`, `AICODE_INTERVIEWS_DIR`, `AICODE_GROUND_TRUTH`,
-`AICODE_SHAREPOINT_DIR`, `AICODE_SAMPLE_FRACTION`, `AICODE_SEED`,
-`AICODE_OUTPUT_DIR`.
+Paths and behaviour are configurable; defaults point at the real study data:
+
+| env var | default | |
+|---|---|---|
+| `AICODE_DATA_ROOT` | `data/` | root of the four inputs |
+| `AICODE_INTERVIEWS_DIR` | `<root>/All chats/All chats` | searched recursively |
+| `AICODE_CODEBOOK` | `<root>/Codebook.xlsx` | |
+| `AICODE_GROUND_TRUTH` | `<root>/Counts.xlsx` | + `AICODE_GT_SHEET` |
+| `AICODE_GROUND_TRUTH_QUOTES` | `<root>/Quotations.xlsx` | |
+| `AICODE_TRANSCRIPT_EXTS` | `.txt,.docx` | |
+| `AICODE_SAMPLE_FRACTION` | `1.0` | spec §4.1 says 0.5; see below |
+| `AICODE_EXCLUDED_CODES` | the 6 admin codes | not coded, not scored |
+| `AICODE_DOCS_PER_CALL` | `25` | documents per model call |
+| `AICODE_MAX_CONCURRENCY` | `4` | batches in flight per code |
+| `AICODE_KAPPA_TARGET` | `0.80` | |
+| `AICODE_MAX_DOC_LOSS` | `0.05` | abort if more documents fail to join |
+
+Two defaults are judgement calls rather than mechanics. **Sample fraction** is
+1.0: spec §4.1 asks for 50%, which existed to limit spend on 14 long template
+interviews, but the real chats are short (the whole corpus is ~65k tokens) and
+coding all of them roughly halves the standard error on every kappa.
+**Excluded codes** are `finished`, `summary` and `summary: 1`–`4`, which
+describe the chatbot's behaviour rather than the participant's answers — every
+ground-truth quote for `finished` is an assistant turn, which the
+interviewee-only rule forbids the model from coding, so it could never be found.
 
 ## Run
 
 ```bash
 pip install -r requirements.txt
-python run_mini.py          # cheap validation first
-python run_pipeline.py      # full 50% across all codes and available models
+python run_pipeline.py --validate-only   # cross-check inputs, no API calls
+python run_mini.py                       # cheap real Azure call
+python run_pipeline.py                   # full run
 ```
+
+`run_pipeline.py` validates its inputs first and refuses to start if they do not
+line up (`--skip-validate` overrides). Validation is where an input mismatch
+should surface: every one of these joins used to fail silently, scoring kappa
+against an all-absent human row or dropping documents without a word.
 
 ## Outputs
 

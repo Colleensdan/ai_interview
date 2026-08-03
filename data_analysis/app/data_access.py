@@ -9,12 +9,13 @@ Sources:
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
-from difflib import get_close_matches
-from functools import lru_cache
 
 import config
+from pipeline.interviews import doc_key
+from pipeline.quote_sheets import QuoteIndex, build_quote_index
 from .inputs import InputStore
 from .quotes import build_norm, locate, merge_overlaps
 
@@ -26,9 +27,14 @@ def _norm(s: str) -> str:
 
 
 def code_color(code_name: str) -> str:
-    """Deterministic, well-spaced HSL colour per code (stable across panels)."""
-    h = (abs(hash(_norm(code_name))) % 360)
-    return f"hsl({h}, 70%, 78%)"
+    """Deterministic, well-spaced HSL colour per code (stable across panels).
+
+    Uses a digest rather than ``hash()``: Python salts string hashing per
+    process, so the colours changed on every restart — which reads as a data
+    bug when a reviewer returns to a transcript.
+    """
+    digest = hashlib.md5(_norm(code_name).encode()).digest()
+    return f"hsl({int.from_bytes(digest[:2], 'big') % 360}, 70%, 78%)"
 
 
 class DataStore:
@@ -37,6 +43,7 @@ class DataStore:
         self._inputs = inputs
         self._interviews = {iv.title: iv.text for iv in inputs.interviews()}
         self._codes = inputs.codebook()  # base defs (overridden by store)
+        self._gt_table = inputs.ground_truth_table()
         self._gt_quotes = self._load_ground_truth_quotes()
         # Cache normalized transcript per doc (built once, reused by locate()).
         self._norm: dict[str, tuple[str, list[int]]] = {
@@ -102,10 +109,23 @@ class DataStore:
     def overview(self, model: str) -> dict:
         kappas = self.latest_kappa(model)
         target = config.KAPPA_TARGET
+        unquoted = set(self.codes_without_quotes())
+        excluded = set(config.EXCLUDED_CODES)
         success, fail = [], []
         for code in (c.name for c in self._codes):
+            # Excluded codes are never sent to the model, so counting them as
+            # failures would understate the pass rate against a denominator
+            # that includes codes nobody tried to score.
+            if code in excluded:
+                continue
             k = kappas.get(code)
             entry = {"code": code, "kappa": k}
+            if code in unquoted:
+                # Human-coded per the count matrix, but the quotes workbook has
+                # no sheet for it, so the comparison view has nothing to
+                # highlight on the human side. Flagged so it doesn't read as an
+                # AI-only code.
+                entry["no_human_quotes"] = True
             if k is not None and k > target:
                 success.append(entry)
             else:
@@ -123,6 +143,9 @@ class DataStore:
             "pct_fail": round(100 * len(fail) / total, 1) if total else 0.0,
             "success": success,
             "fail": fail,
+            # Named so the exclusion is visible rather than looking like codes
+            # that quietly went missing from the codebook.
+            "excluded": sorted(c.name for c in self._codes if c.name in excluded),
         }
 
     # --- documents ---------------------------------------------------------
@@ -160,40 +183,69 @@ class DataStore:
         return [dict(r) for r in rows]
 
     # --- ground truth ------------------------------------------------------
-    def _load_ground_truth_quotes(self) -> dict[str, list[str]]:
-        """Map code name -> list of human-coded quote strings (from Ground Truth.xlsx)."""
+    def _load_ground_truth_quotes(self) -> QuoteIndex:
+        """Resolve the quotes workbook to {code -> quotations}, each attributed
+        to the document it came from.
+
+        Sheet names are lossy (Excel truncates to 31 chars and strips ``/``), so
+        the mapping is resolved deterministically against the count matrix
+        rather than guessed at — see :mod:`pipeline.quote_sheets`.
+        """
         wb = self._inputs.ground_truth_quotes_workbook()
-        code_names = [c.name for c in self._codes]
-        norm_to_code = {_norm(n): n for n in code_names}
-        result: dict[str, list[str]] = {}
-        for sheet in wb.sheetnames:
-            code = norm_to_code.get(_norm(sheet))
-            if code is None:
-                close = get_close_matches(_norm(sheet), list(norm_to_code), n=1, cutoff=0.8)
-                code = norm_to_code[close[0]] if close else sheet
-            ws = wb[sheet]
-            quotes = []
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if len(row) > 1 and row[1]:
-                    quotes.append(str(row[1]))
-            result.setdefault(code, []).extend(quotes)
-        wb.close()
-        return result
+        try:
+            table = self._inputs.ground_truth_table()
+            index = build_quote_index(
+                wb,
+                [c.name for c in self._codes],
+                groundedness=table.code_groundedness,
+                doc_for_number=table.document_for_number,
+                non_code_sheets=config.NON_CODE_SHEETS,
+            )
+        finally:
+            wb.close()
+        return index
+
+    def codes_without_quotes(self) -> list[str]:
+        """Codes the humans applied that have no quotes to highlight.
+
+        The kappa figure and the highlight panel read different files: kappa's
+        human side comes from the count matrix, highlights come from the quotes
+        workbook. A code present in the first but absent from the second is
+        genuinely human-coded yet has nothing to draw — without this it renders
+        as if only the AI had found it. Surfaced so the UI can say so.
+        """
+        return list(self._gt_quotes.codes_without_sheets)
 
     def _all_human_hits(self, doc: str) -> list[dict]:
-        """All human-coded quotes located in this doc (cached; computed once)."""
+        """All human-coded quotes located in this doc (cached; computed once).
+
+        Only quotes whose ATLAS.ti document ID resolves to *this* document are
+        considered. Searching every transcript for every quote would mis-attribute
+        the short ones — "Angry", "4" — which occur verbatim in many interviews.
+        """
         if doc in self._human_cache:
             return self._human_cache[doc]
         text = self._interviews.get(doc, "")
         norm = self._norm.get(doc)
+        doc_key = self._doc_key(doc)
         hits = []
-        for code, quotes in self._gt_quotes.items():
-            for q in quotes:
-                span = locate(text, q, norm=norm)
+        for code, quotations in self._gt_quotes.by_code.items():
+            for q in quotations:
+                # Unattributed quotes (no usable ID) fall back to searching this
+                # document, preserving the old behaviour for exports without IDs.
+                if q.doc is not None and q.doc != doc_key:
+                    continue
+                span = locate(text, q.quote, norm=norm)
                 if span:
-                    hits.append({"code": code, "quote": q, "start": span.start, "end": span.end})
+                    hits.append({"code": code, "quote": q.quote,
+                                 "start": span.start, "end": span.end})
         self._human_cache[doc] = hits
         return hits
+
+    @staticmethod
+    def _doc_key(title: str) -> str:
+        """Document title (a filename) -> the key used by the count matrix."""
+        return doc_key(title)
 
     def human_hits(self, doc: str, codes: list[str] | None = None) -> list[dict]:
         """Human-coded quotes located in this doc, optionally filtered by code."""
@@ -229,7 +281,24 @@ class DataStore:
             "meanings": {c: defs.get(c, "") for c in used_codes},
             "ai_codes": sorted({p["code"] for _, _, p in ai_spans}),
             "human_codes": sorted({p["code"] for _, _, p in human_spans}),
+            # Codes the humans applied to THIS document that cannot be shown,
+            # because the quotes workbook has no sheet for them. Without this
+            # the reviewer sees an AI-only highlight and concludes the model
+            # invented it, when the humans coded it too.
+            "human_codes_unquoted": self.unquoted_codes_for(doc, codes),
         }
+
+    def unquoted_codes_for(self, doc: str, codes: list[str] | None = None) -> list[str]:
+        """Codes the count matrix records for *doc* but which have no quotes."""
+        key = self._doc_key(doc)
+        want = set(codes) if codes else None
+        out = []
+        for code in self.codes_without_quotes():
+            if want is not None and code not in want:
+                continue
+            if self._gt_table.counts.get(code, {}).get(key, 0) > 0:
+                out.append(code)
+        return sorted(out)
 
     @staticmethod
     def _segments(text: str, spans: list[tuple[int, int, dict]]) -> list[dict]:

@@ -33,9 +33,16 @@ Non-secret (already in `render.yaml`, override if needed):
 | `DATABASE_PATH` | `/var/data/coding.sqlite` |
 | `AICODE_OUTPUT_DIR` | `/var/data/outputs` |
 | `AICODE_DATA_ROOT` | `/var/data/input` |
-| `AICODE_SHAREPOINT_DIR` | `Test Data` |
+| `AICODE_SHAREPOINT_DIR` | the input folder in SharePoint |
+| `AICODE_SHAREPOINT_STATE_DIR` | **set this explicitly** — see below |
 | `CJBS_DEPLOYMENT_NAME` | `gpt-5-mini` (pinned — not a secret; keep it matching the data) |
 | `PYTHON_VERSION` | `3.13.4` |
+
+> **Set both SharePoint variables when you change data sets.**
+> `AICODE_SHAREPOINT_STATE_DIR` defaults to `<AICODE_SHAREPOINT_DIR>/state`, so
+> repointing only the input folder silently relocates the authoritative results
+> database too — the app then boots against an empty state and every kappa
+> disappears. Setting both makes the two independent and explicit.
 
 Secrets (set as `sync:false` — **never committed**):
 
@@ -53,9 +60,9 @@ Secrets (set as `sync:false` — **never committed**):
 
 ## First boot / data population
 
-On startup the app pulls the configured SharePoint folder (`Test Data`) into
+On startup the app pulls the configured SharePoint folder into
 `/var/data/input` and, if `/var/data/coding.sqlite` doesn't exist yet, seeds it
-from `Test Data/coding_seed.sqlite` (uploaded by `upload_test_data.py`). So a
+from `<folder>/coding_seed.sqlite` (uploaded by `upload_test_data.py`). So a
 fresh disk self-populates — no manual copy needed. If you ever want to force a
 re-download, set `AICODE_SP_REFRESH=1`.
 

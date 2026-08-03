@@ -12,7 +12,7 @@ import json
 import re
 
 import config
-from .base import CodeHit, CodingRequest, ModelAdapter
+from .base import CodeHit, CodingRequest, ModelAdapter, TruncatedResponseError
 
 _SYSTEM_PROMPT = (
     "You are an expert qualitative-coding assistant for social-science research. "
@@ -91,7 +91,9 @@ class AzureOpenAIAdapter(ModelAdapter):
                 api_version=config.AZURE_API_VERSION,
                 azure_endpoint=config.AZURE_ENDPOINT,
                 timeout=config.REQUEST_TIMEOUT,
-                max_retries=2,
+                # The SDK retries 429s with exponential backoff; batches now run
+                # concurrently, so give it more room before surfacing an error.
+                max_retries=5,
             )
         return self._client
 
@@ -107,26 +109,36 @@ class AzureOpenAIAdapter(ModelAdapter):
         transcript quotes otherwise break the response with unescaped quotes /
         control characters). Falls back cleanly if a param is unsupported and
         remembers the result so later calls don't repeat the failed request.
+
+        The retry decision is based on what *this* attempt actually sent, not on
+        the shared flag. Batches run concurrently, so several threads meet the
+        same rejection at once: reading the flag would let the first thread flip
+        it and the rest conclude they had nothing left to drop, and the error
+        would escape.
         """
         client = self._get_client()
+        sent_temperature = type(self)._send_temperature
+        sent_response_format = type(self)._send_response_format
         while True:
             kwargs = dict(
                 model=config.AZURE_DEPLOYMENT,
                 messages=messages,
                 max_completion_tokens=config.MAX_OUTPUT_TOKENS,
             )
-            if type(self)._send_temperature:
+            if sent_temperature:
                 kwargs["temperature"] = 0
-            if type(self)._send_response_format:
+            if sent_response_format:
                 kwargs["response_format"] = {"type": "json_object"}
             try:
                 return client.chat.completions.create(**kwargs)
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc).lower()
-                if "temperature" in msg and type(self)._send_temperature:
+                if "temperature" in msg and sent_temperature:
+                    sent_temperature = False
                     type(self)._send_temperature = False
                     continue
-                if "response_format" in msg and type(self)._send_response_format:
+                if "response_format" in msg and sent_response_format:
+                    sent_response_format = False
                     type(self)._send_response_format = False
                     continue
                 raise
@@ -147,12 +159,14 @@ class AzureOpenAIAdapter(ModelAdapter):
         )
         choice = resp.choices[0]
         content = choice.message.content or ""
-        # Fail safe: a truncated (finish_reason="length") or malformed response
-        # must not crash a multi-code run. Log and treat as "no occurrences".
+        # A truncated answer is not an empty answer. Surfacing it lets the
+        # caller retry on fewer documents; swallowing it used to make a code
+        # that appears everywhere look like a code that appears nowhere.
         if choice.finish_reason == "length":
-            print(f"    ! {request.code_name}: response hit token limit "
-                  f"(finish_reason=length); treating as no occurrences.")
-            return []
+            raise TruncatedResponseError(
+                f"{request.code_name}: hit the {config.MAX_OUTPUT_TOKENS}-token "
+                f"output limit across {len(request.document_titles)} document(s)"
+            )
         try:
             data = _extract_json(content)
         except (ValueError, TypeError) as exc:
@@ -162,7 +176,21 @@ class AzureOpenAIAdapter(ModelAdapter):
 
         valid_titles = set(request.document_titles)
         hits: list[CodeHit] = []
-        for occ in data.get("occurrences", []):
+        occurrences = data.get("occurrences", []) if isinstance(data, dict) else []
+        if isinstance(occurrences, dict):      # a lone object instead of a list
+            occurrences = [occurrences]
+        elif not isinstance(occurrences, list):
+            occurrences = []
+        malformed = 0
+        for occ in occurrences:
+            # JSON mode guarantees valid JSON, not a particular shape: across a
+            # few hundred calls the model occasionally emits a bare string in
+            # place of an occurrence object. Skip those rather than crashing the
+            # run — and rather than guessing which document they belong to,
+            # since a wrongly attributed quote corrupts the count matrix.
+            if not isinstance(occ, dict):
+                malformed += 1
+                continue
             title = str(occ.get("document_title", "")).strip()
             quote = str(occ.get("quote", "")).strip()
             reason = str(occ.get("reason", "")).strip()
@@ -184,4 +212,7 @@ class AzureOpenAIAdapter(ModelAdapter):
                     reason=reason,
                 )
             )
+        if malformed:
+            print(f"    ! {request.code_name}: skipped {malformed} malformed "
+                  f"occurrence(s) that were not objects.", flush=True)
         return hits

@@ -13,6 +13,16 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 
+class TruncatedResponseError(RuntimeError):
+    """The model ran out of output tokens before finishing its answer.
+
+    Raised rather than swallowed: a truncated reply carries an arbitrary prefix
+    of the occurrences, so treating it as "no occurrences" (or as a complete
+    list) silently understates how often a code appears and corrupts its kappa.
+    The caller is expected to retry with fewer documents.
+    """
+
+
 @dataclass(frozen=True)
 class CodeHit:
     """One occurrence of a code the model found in one document.
