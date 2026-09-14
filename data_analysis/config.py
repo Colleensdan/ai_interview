@@ -103,6 +103,31 @@ GROUND_TRUTH_COUNTS_PATH = _path_env(
 )
 GROUND_TRUTH_COUNTS_SHEET = os.getenv("AICODE_GT_SHEET", "CodeDocumentTable")
 
+# Codes RENAMED between ground-truth exports: "codebook name=ground-truth name".
+# Fuzzy matching (pipeline.agreement.match_codes) handles spelling drift, not
+# renames — a changed word puts the pair below any cutoff that is safe against
+# false pairings — so a rename must be asserted explicitly and reviewably here,
+# or the code silently loses its human row and its kappa becomes meaningless.
+#
+# 2026-09 export ("Counts 3"): "information seeking/increased awareness" was
+# renamed to "...increased attention". Same construct — the two rows share 11 of
+# their 12 documents. NOTE this is deliberately NOT used to paper over the same
+# export's removal of "worry": that code was genuinely dropped by the human
+# coders (3 quotations across 3 documents) with no successor, so it is reported
+# as unscored rather than aliased onto some other code.
+GT_CODE_ALIASES = {
+    k.strip(): v.strip()
+    for k, v in (
+        pair.split("=", 1)
+        for pair in os.getenv(
+            "AICODE_GT_CODE_ALIASES",
+            "information seeking/increased awareness"
+            "=information seeking/increased attention",
+        ).split(";")
+        if pair.strip() and "=" in pair
+    )
+}
+
 # Human ground-truth quotes (one sheet per code) — used by the Task 2 app to
 # highlight human-coded passages inside transcripts. "Ground Truth.xlsx" in the
 # template export, "Quotations.xlsx" in the real one.
@@ -118,20 +143,57 @@ NON_CODE_SHEETS = {
     if s.strip()
 }
 
-# Codes to exclude from LLM coding and from kappa. These describe the chatbot's
-# own behaviour rather than anything the participant said, so they are not a
-# meaningful test of the codebook: "finished" marks the assistant's closing turn
-# (every one of its ground-truth quotes is an assistant turn, which the
-# interviewee-only rule below forbids the model from coding, so it can never be
-# found), "summary" marks the assistant's summary, and "summary: N" records the
-# participant's 1-5 rating of it.
+# Codes excluded from LLM coding and from kappa. Two codes remain, for two
+# different reasons; the chatbot-behaviour codes that were once listed here were
+# reinstated on 2026-09-14 (see PROCEDURAL_CODES below).
+#
+# 1. "summary" — not a code at all. The researchers confirmed it is a parent
+#    category ATLAS.ti generates automatically over "summary: 1".."summary: 4",
+#    which is why its definition cell is empty and it has no quotation sheet.
+#    Its 57 documents are exactly the union of its four children, so coding it
+#    would measure nothing the children do not already measure.
+#
+# 2. "worry" — withdrawn by the human coders. The 2026-09 ground-truth export
+#    drops the code entirely; in the previous export it carried 3 quotations
+#    across 3 documents, and no other code absorbed them. With no human row
+#    there is nothing to agree with, so asking the model to code it would
+#    produce a kappa that only looks like a measurement.
 EXCLUDED_CODES = [
     s.strip() for s in os.getenv(
         "AICODE_EXCLUDED_CODES",
-        "finished,summary,summary: 1,summary: 2,summary: 3,summary: 4",
+        "summary,worry",
     ).split(",")
     if s.strip()
 ]
+
+# Codes whose referent is the interviewer's own behaviour rather than anything
+# the participant said. The default scope codes interviewee turns only, which
+# keeps the model from coding the interviewer's questions as though the
+# participant had said them; "finished" marks the assistant's closing turn, and
+# all 63 of its ground-truth quotations are assistant turns, so under that
+# default it can never be found. Scope is ours to set rather than the
+# researchers': the ATLAS.ti codebook carries no scope column.
+INTERVIEWER_ONLY_CODES = frozenset(
+    s.strip() for s in os.getenv(
+        "AICODE_INTERVIEWER_ONLY_CODES", "finished"
+    ).split(",")
+    if s.strip()
+)
+
+# Codes that are coded and scored, but held OUT of the cross-model comparison.
+# These describe the interview procedure (did the chatbot close the chat; how
+# did the participant rate its summary) rather than the substance of what was
+# said, so they test instruction-following rather than semantic judgement.
+# Folding them in would move each model's mean kappa by more than the gaps that
+# currently separate the models, and could reorder them for reasons unrelated to
+# coding performance. Reported separately instead, on the researchers' request.
+PROCEDURAL_CODES = frozenset(
+    s.strip() for s in os.getenv(
+        "AICODE_PROCEDURAL_CODES",
+        "finished,summary: 1,summary: 2,summary: 3,summary: 4",
+    ).split(",")
+    if s.strip()
+)
 
 # Outputs / persistent store (live under DATA_DIR so they survive restarts).
 OUTPUT_DIR = _path_env("AICODE_OUTPUT_DIR", DATA_DIR / "outputs")
@@ -189,6 +251,61 @@ AZURE_ENDPOINT = os.getenv("CJBS_API_ENDPOINT")
 AZURE_API_VERSION = os.getenv("CJBS_API_VERSION", "2023-05-15")
 AZURE_DEPLOYMENT = os.getenv("CJBS_DEPLOYMENT_NAME")
 
+# The CJBS endpoint is an APIM gateway fronting three wire protocols on the same
+# key (see models/catalog.py). These are the two non-deployment routes; both are
+# derived from CJBS_API_ENDPOINT so nothing new is needed in .env.
+def _gateway_base(suffix: str) -> str:
+    base = (AZURE_ENDPOINT or "").rstrip("/")
+    return f"{base}{suffix}" if base else ""
+
+
+# OpenAI-compatible route: model named in the request body, no api-version.
+GATEWAY_OPENAI_BASE = os.getenv("CJBS_OPENAI_V1_BASE") or _gateway_base("/openai/v1")
+# Anthropic Messages route: authenticates with x-api-key, not api-key.
+GATEWAY_ANTHROPIC_BASE = os.getenv("CJBS_ANTHROPIC_BASE") or _gateway_base("/anthropic")
+ANTHROPIC_VERSION = os.getenv("CJBS_ANTHROPIC_VERSION", "2023-06-01")
+
+# --- second gateway (n1ai) ---------------------------------------------------
+# A separate APIM subscription with its own key. It exposes the SAME two routes
+# as CJBS (/openai/v1/chat/completions and /anthropic/v1/messages, both verified
+# live), so no new adapter is needed — only different credentials. Entitlement,
+# not routing, is what differs: the newer multi-vendor models answer here and
+# 403 on CJBS. Each catalog entry names its gateway; see models/catalog.py.
+N1AI_ENDPOINT = os.getenv("N1AI_API_ENDPOINT")
+N1AI_API_KEY = os.getenv("N1AI_API_KEY")
+
+
+def _n1ai_base(suffix: str) -> str:
+    base = (N1AI_ENDPOINT or "").rstrip("/")
+    return f"{base}{suffix}" if base else ""
+
+
+#: gateway name -> (openai-compatible base, anthropic base, api key).
+#: Adapters resolve credentials through this rather than reading module globals,
+#: so adding a third gateway is one entry here plus one field in the catalog.
+GATEWAYS: dict[str, tuple[str, str, str | None]] = {
+    "cjbs": (GATEWAY_OPENAI_BASE, GATEWAY_ANTHROPIC_BASE, AZURE_API_KEY),
+    "n1ai": (_n1ai_base("/openai/v1"), _n1ai_base("/anthropic"), N1AI_API_KEY),
+}
+
+
+def gateway_credentials(name: str) -> tuple[str, str, str | None]:
+    """(openai_base, anthropic_base, api_key) for a named gateway.
+
+    An unknown name falls back to the CJBS gateway rather than raising: a model
+    row naming a gateway nobody configured should report itself unavailable
+    through the adapter's normal ``is_available()`` path, not crash the import.
+    """
+    return GATEWAYS.get(name, GATEWAYS["cjbs"])
+
+# Which models the pipeline actually runs. UNSET (the default) means "just the
+# CJBS_DEPLOYMENT_NAME deployment", i.e. exactly the single-model behaviour the
+# pipeline has always had — registering more models in the catalog does not put
+# them into a run. Set e.g. AICODE_MODELS=gpt-5-mini,claude-sonnet-4-6 to opt in.
+SELECTED_MODELS = [
+    s.strip() for s in os.getenv("AICODE_MODELS", "").split(",") if s.strip()
+]
+
 # Generous cap: reasoning models (e.g. gpt-5-mini) spend tokens on reasoning
 # before emitting the JSON, and a code can have many occurrences.
 MAX_OUTPUT_TOKENS = int(os.getenv("AICODE_MAX_OUTPUT_TOKENS", "16384"))
@@ -205,6 +322,18 @@ DOCS_PER_CALL = int(os.getenv("AICODE_DOCS_PER_CALL", "25"))
 # Batches within a single code may run concurrently; codes stay sequential
 # (spec 4.2: "process one code at a time").
 MAX_CONCURRENT_CALLS = int(os.getenv("AICODE_MAX_CONCURRENCY", "4"))
+# How many times to retry a call that failed for infrastructure reasons (shared
+# backend circuit breaker, 429, 5xx). The alternative to retrying is dropping the
+# code from the run, which puts a hole in the model x code matrix and quietly
+# changes what a model's mean kappa is an average over. See pipeline.coding.
+TRANSIENT_RETRY_ATTEMPTS = int(os.getenv("AICODE_TRANSIENT_RETRIES", "6"))
+# Quota exhaustion refills on the provider's clock, so it gets a longer, flatter
+# backoff than a circuit breaker. These defaults ride out a short per-minute
+# window; a spent daily allowance will still exhaust the attempts and drop the
+# code, which is correct — waiting hours inside a run helps nobody, and
+# score_run.py + --resume-run-id make finishing later cheap.
+QUOTA_RETRY_BASE_SECONDS = float(os.getenv("AICODE_QUOTA_RETRY_BASE", "45"))
+QUOTA_RETRY_MAX_SECONDS = float(os.getenv("AICODE_QUOTA_RETRY_MAX", "180"))
 
 # Cohen's kappa target (spec 4.8).
 KAPPA_TARGET = float(os.getenv("AICODE_KAPPA_TARGET", "0.80"))

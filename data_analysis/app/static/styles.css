@@ -78,6 +78,20 @@ main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: 
 .kpi.success .big { color: var(--green); }
 .kpi.fail .big { color: var(--red); }
 
+/* Headline agreement figure: the mean kappa across all codes. Given its own
+   leading tile because it summarises the whole codebook, where the tiles beside
+   it only count codes either side of the target. The accent bar and larger
+   numeral mark it as the figure to read first. */
+.kpi.headline {
+  border-left: 4px solid var(--brand);
+  flex: 0 0 auto; min-width: 250px;
+}
+.kpi.headline .big { font-size: 46px; }
+.kpi.headline .sub {
+  color: var(--muted); margin-top: 6px; font-size: 12.5px; line-height: 1.5;
+}
+.kpi.headline .big.unscored { font-size: 30px; color: var(--muted); }
+
 .columns { display: flex; gap: 24px; align-items: flex-start; }
 .col { flex: 1; background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
 .col h3 { margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--line); font-size: 15px; display: flex; justify-content: space-between; align-items: center; }

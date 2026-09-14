@@ -160,7 +160,11 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
         batches = make_batches(sample)
         gt_counts, gt_keys = inputs.ground_truth_counts()
         doc_pairs = [(iv.title, iv.key) for iv in sample if iv.key in gt_keys]
-        code_to_gt = match_codes(codes, list(gt_counts))
+        # Same alias map as run_pipeline.py: a re-analysis that matched codes to
+        # ground truth differently from the batch run would report a kappa the
+        # full pipeline could never reproduce.
+        code_to_gt = match_codes(codes, list(gt_counts),
+                                 aliases=config.GT_CODE_ALIASES)
 
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_reanalyze"
         conn = storage.init_db(config.DB_PATH)

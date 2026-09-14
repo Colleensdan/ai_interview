@@ -71,11 +71,74 @@ Paths and behaviour are configurable; defaults point at the real study data:
 | `AICODE_GROUND_TRUTH_QUOTES` | `<root>/Quotations.xlsx` | |
 | `AICODE_TRANSCRIPT_EXTS` | `.txt,.docx` | |
 | `AICODE_SAMPLE_FRACTION` | `1.0` | spec §4.1 says 0.5; see below |
-| `AICODE_EXCLUDED_CODES` | the 6 admin codes | not coded, not scored |
+| `AICODE_EXCLUDED_CODES` | 6 admin codes + `worry` | not coded, not scored |
+| `AICODE_GT_CODE_ALIASES` | one rename (see below) | `codebook name=ground-truth name`, `;`-separated |
 | `AICODE_DOCS_PER_CALL` | `25` | documents per model call |
 | `AICODE_MAX_CONCURRENCY` | `4` | batches in flight per code |
 | `AICODE_KAPPA_TARGET` | `0.80` | |
 | `AICODE_MAX_DOC_LOSS` | `0.05` | abort if more documents fail to join |
+| `AICODE_MODELS` | *(unset)* | opt in to extra models; see below |
+
+### Ground-truth code drift
+
+Ground-truth exports are re-issued as the human coders revise their work, and
+the code set moves between issues. Two kinds of drift need handling, because
+both corrupt kappa silently:
+
+* **Renamed code.** Fuzzy matching (`pipeline.agreement.match_codes`) absorbs
+  spelling drift, but not a changed word — no cutoff both catches
+  `increased awareness` -> `increased attention` and refuses to pair genuinely
+  different codes. Assert the rename in `AICODE_GT_CODE_ALIASES` so it is
+  visible and reviewable. An alias whose target is absent from the export is
+  ignored, so a stale entry cannot resurrect a dropped code.
+* **Dropped code.** A codebook code with no ground-truth row is reported as
+  **unscored** (`KappaResult.no_ground_truth`) and excluded from the mean —
+  never scored against an all-absent human row. That path looks conservative
+  but is not: if the model also never applies the code, both vectors are
+  identical constants and Cohen's kappa returns **1.0**, a perfect score for a
+  code nobody could score, which then inflates the headline average.
+
+`run_pipeline.py --validate-only` reports both before any model is called.
+
+
+## Models
+
+The CJBS endpoint is an Azure API Management gateway, and it fronts three wire
+protocols on the *same* credentials — so a second or third model needs no new
+key, only the right route:
+
+| route | models | auth header |
+|---|---|---|
+| `/openai/deployments/{name}/chat/completions` | `gpt-5-mini`, `gpt-4.1-nano` | `api-key` |
+| `/openai/v1/chat/completions` | `gpt-5.2`, `gpt-5.2-chat`, `gpt-5.6-luna`, `gpt-5.6-sol`, `Mistral-Large-3`, `mistral-small-2503` | `Authorization: Bearer` |
+| `/anthropic/v1/messages` | `claude-fable-5`, `claude-sonnet-4-6` | `x-api-key` |
+
+`models/catalog.py` is the whole registry — a new model is one row, and
+`models.adapter_for()` picks the transport from it. Every model is given the
+same prompt and its reply is parsed by the same rules (`models/prompting.py`),
+so a kappa comparison measures the model rather than the adapter.
+
+**Registering a model does not put it into a run.** With `AICODE_MODELS` unset —
+the default, and what Render deploys — the pipeline codes with exactly one
+model, the `CJBS_DEPLOYMENT_NAME` deployment (`gpt-5-mini`), as it always has.
+Setting `AICODE_MODELS=gpt-5-mini,claude-sonnet-4-6` replaces that set, and each
+named model is coded and scored separately.
+
+Check what the key can actually reach:
+
+```
+python check_models.py                       # every catalog model
+python check_models.py gpt-5.2 claude-fable-5
+```
+
+It calls `adapter.code_one()` on a small synthetic transcript, so a model only
+passes if it authenticates, accepts our parameters, obeys the role-tag rule and
+returns parseable JSON. **As of the last run only `gpt-5-mini` and
+`gpt-4.1-nano` pass**; the other eight return `403 ModelNotAllowed`, meaning the
+subscription has not been granted them. That is an entitlement setting on the
+CJBS key, not something the code can work around — the routes and the auth
+headers are already correct, and each model starts working the moment access is
+added, with no code change.
 
 Two defaults are judgement calls rather than mechanics. **Sample fraction** is
 1.0: spec §4.1 asks for 50%, which existed to limit spend on 14 long template
@@ -85,6 +148,16 @@ coding all of them roughly halves the standard error on every kappa.
 describe the chatbot's behaviour rather than the participant's answers — every
 ground-truth quote for `finished` is an assistant turn, which the
 interviewee-only rule forbids the model from coding, so it could never be found.
+`worry` is excluded for a different reason: the 2026-09 ground-truth export
+withdrew it, so there is no human row left to agree with.
+
+**Average kappa.** `pipeline.agreement.mean_kappa` reports the *unweighted*
+mean across codes, shown as the headline tile on the app's home page. Each code
+is one construct in the codebook and counts once, regardless of how often it
+occurs; a pooled kappa over all code x document cells would answer a different
+question and let the commonest codes outvote the rest. Undefined kappas are
+excluded rather than read as zero, and the tile states how many codes the mean
+covers. The median is shown beside it as a skew check.
 
 ## Run
 
@@ -92,8 +165,21 @@ interviewee-only rule forbids the model from coding, so it could never be found.
 pip install -r requirements.txt
 python run_pipeline.py --validate-only   # cross-check inputs, no API calls
 python run_mini.py                       # cheap real Azure call
-python run_pipeline.py                   # full run
+python run_pipeline.py                   # full run (original codebook definitions)
+
+# code with the reviewers' CURRENT edited definitions instead:
+python run_pipeline.py --definitions=current
+python run_pipeline.py --definitions=current --definitions-db /path/to/coding.sqlite
 ```
+
+**Which definitions a run used matters, and is easy to get wrong.** By default
+`run_pipeline.py` codes with the original `Codebook.xlsx` text, while the Task 2
+app's re-analyse (`app/jobs.py`) codes with each code's *current* version from
+`code_definitions`. Those answer different questions, so kappas from the two are
+not comparable. `--definitions=current` makes the batch run match the app.
+`--definitions-db` points at a specific store and is opened read-only (via an
+in-memory copy — `DefinitionStore` would otherwise `CREATE TABLE IF NOT EXISTS`
+on the file just to read it), so an archived database is safe to use.
 
 `run_pipeline.py` validates its inputs first and refuses to start if they do not
 line up (`--skip-validate` overrides). Validation is where an input mismatch

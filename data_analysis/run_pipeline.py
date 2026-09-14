@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
+from pathlib import Path
 
 import config
 from models import available_adapters
-from pipeline.agreement import match_codes, per_code_kappa
+from pipeline.agreement import match_codes, mean_kappa, per_code_kappa
 from pipeline.codebook import load_codebook
 from pipeline.coding import code_across_batches, make_batches
 from pipeline.ground_truth import load_ground_truth_counts
@@ -32,17 +36,80 @@ def _slug(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
 
+def load_current_definitions(db_path) -> dict[str, str]:
+    """Read each code's CURRENT definition from a definitions store, read-only.
+
+    ``Codebook.xlsx`` holds the definitions the study started with; the Task 2
+    app archives every edit to ``code_definitions`` and marks one row per code
+    ``is_current``. Those two answer different questions, and a run that used
+    the codebook while the reviewers had spent weeks improving the definitions
+    would report a kappa for work nobody is using.
+
+    Opened by deserializing a private in-memory copy rather than connecting to
+    the file: :class:`app.definitions.DefinitionStore` runs ``CREATE TABLE IF
+    NOT EXISTS`` on construction, so merely opening the store to READ it writes
+    to the file — unacceptable when the file is an archived copy of the
+    reviewers' work. Nothing here can modify ``db_path``.
+    """
+    import sqlite3
+
+    import db as _db
+
+    raw = Path(db_path).read_bytes()
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.deserialize(_db._as_rollback_image(raw))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT code_name, definition, version FROM code_definitions "
+            "WHERE is_current=1").fetchall()
+    finally:
+        conn.close()
+    return {r["code_name"]: (r["definition"], r["version"]) for r in rows}
+
+
 def _note(msg: str) -> None:
     print(msg, flush=True)
 
 
-def run(max_codes: int | None = None, max_docs: int | None = None, label: str = "") -> dict:
+def run(max_codes: int | None = None, max_docs: int | None = None, label: str = "",
+        definitions: str = "codebook", definitions_db=None,
+        model_concurrency: int = 1, resume_run_id: str | None = None) -> dict:
     out = config.ensure_output_dir()
-    run_id = time.strftime("%Y%m%d_%H%M%S") + (f"_{label}" if label else "")
+    # Resuming appends this invocation's models to an EXISTING run. External
+    # limits (a quota ceiling, a dropped connection) can stop a multi-model run
+    # part-way, and without this the only way to add the missing models is to
+    # re-code the ones that already succeeded — paying twice for identical work
+    # and, worse, splitting one experiment across two run ids that can no longer
+    # be compared as a single matrix.
+    run_id = resume_run_id or (
+        time.strftime("%Y%m%d_%H%M%S") + (f"_{label}" if label else ""))
     suffix = f"_{label}" if label else ""
 
     # 1. Inputs --------------------------------------------------------------
     codes = load_codebook(config.CODEBOOK_PATH)
+
+    if definitions == "current":
+        src = definitions_db or config.DB_PATH
+        current = load_current_definitions(src)
+        applied = [c for c in codes if c.name in current
+                   and current[c.name][0] != c.definition]
+        codes = [
+            replace(c, definition=current[c.name][0]) if c.name in current else c
+            for c in codes
+        ]
+        print(f"  definitions: CURRENT versions from {src}")
+        print(f"    {len(applied)} code(s) coded with a reviewer-edited definition "
+              f"instead of the codebook's "
+              f"(max version v{max(current[c.name][1] for c in applied)})"
+              if applied else "    (no edited definitions found; identical to codebook)")
+        missing = [c.name for c in codes if c.name not in current]
+        if missing:
+            print(f"    WARNING: {len(missing)} code(s) absent from the definitions "
+                  f"store; falling back to the codebook text for them: {missing}")
+    else:
+        print("  definitions: original Codebook.xlsx text")
+
     excluded = set(config.EXCLUDED_CODES)
     dropped = [c.name for c in codes if c.name in excluded]
     codes = [c for c in codes if c.name not in excluded]
@@ -72,6 +139,42 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
 
     conn = storage.init_db(config.DB_PATH)
 
+    # A run is "full" only if nothing narrowed its scope. Recorded now rather
+    # than inferred later from the label, because a label is a free-text string
+    # and publishing the wrong run to the live app is not a recoverable mistake
+    # in reviewers' minds even when it is in the database.
+    if resume_run_id:
+        import sqlite3 as _sqlite3
+
+        # init_db hands back a plain connection; the columns are read by name.
+        conn.row_factory = _sqlite3.Row
+        prior = conn.execute("SELECT * FROM runs WHERE run_id=?",
+                             (run_id,)).fetchone()
+        if prior is None:
+            print(f"No run {run_id!r} to resume.", file=sys.stderr)
+            sys.exit(1)
+        # A resume must not silently relax the scope the run was recorded with:
+        # appending a truncated model to a full run would make `is_full` a lie.
+        if prior["is_full"] and (max_codes is not None or max_docs is not None):
+            print(f"Refusing to append a scope-limited model set to full run "
+                  f"{run_id!r}.", file=sys.stderr)
+            sys.exit(1)
+        prior_models = [m for m in (prior["models"] or "").split(",") if m]
+        merged = prior_models + [a.name for a in adapters
+                                 if a.name not in prior_models]
+        storage.record_run(
+            conn, run_id, label=prior["label"], is_full=bool(prior["is_full"]),
+            n_codes=prior["n_codes"], n_documents=prior["n_documents"],
+            definitions=prior["definitions"], models=merged)
+        print(f"  resuming run {run_id} (had: {', '.join(prior_models) or 'none'})")
+    else:
+        storage.record_run(
+            conn, run_id, label=label,
+            is_full=(max_codes is None and max_docs is None),
+            n_codes=len(codes), n_documents=len(sample),
+            definitions=definitions, models=[a.name for a in adapters],
+        )
+
     # Documents are sent in batches rather than as one blob: the output token
     # budget is shared with the model's reasoning tokens, so a frequent code
     # across a large corpus overflows it — and a truncated reply is
@@ -85,8 +188,17 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     # 2-5. Per-model coding + matrices --------------------------------------
     per_model_matrices: list[tuple[str, dict]] = []
     failed: dict[str, list[str]] = {}
-    for adapter in adapters:
-        print(f"  coding with {adapter.name} ...")
+    write_lock = threading.Lock()
+
+    def code_with(adapter):
+        """Run every code through one model, then persist that model's results.
+
+        Persisting inside the worker (under a lock) rather than after every
+        model finishes keeps the original durability property: a crash or an
+        interrupt loses only the model still in flight, not the hours of work
+        already done by the others.
+        """
+        prefix = f"[{adapter.name}]"
         hits = []
         for i, code in enumerate(codes, 1):
             t0 = time.time()
@@ -99,27 +211,66 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                 # because nothing is persisted until the loop finishes. The
                 # code is dropped from scoring rather than recorded as absent,
                 # which would look like a real (and very poor) result.
-                failed.setdefault(adapter.name, []).append(code.name)
-                print(f"    ! [{i}/{len(codes)}] {code.name}: FAILED after "
+                with write_lock:
+                    failed.setdefault(adapter.name, []).append(code.name)
+                print(f"    ! {prefix} [{i}/{len(codes)}] {code.name}: FAILED after "
                       f"{time.time() - t0:.0f}s ({type(exc).__name__}: {exc}); "
                       f"excluded from this run.", flush=True)
                 continue
             hits.extend(code_hits)
-            print(f"    [{i}/{len(codes)}] {code.name}: "
+            print(f"    {prefix} [{i}/{len(codes)}] {code.name}: "
                   f"{len(code_hits)} occurrence(s) ({time.time() - t0:.0f}s)",
                   flush=True)
 
         model_codes = [c for c in code_names
                        if c not in set(failed.get(adapter.name, []))]
-        results_csv = out / f"results_{_slug(adapter.name)}{suffix}.csv"
-        storage.write_results_csv(results_csv, hits)
-        storage.insert_coding_results(conn, run_id, adapter.name, hits)
-
         matrix = build_count_matrix(hits, model_codes, titles)
-        matrix_csv = out / f"countmatrix_{_slug(adapter.name)}{suffix}.csv"
-        storage.write_matrix_csv(matrix_csv, matrix, model_codes, titles)
-        storage.insert_count_matrix(conn, run_id, adapter.name, matrix, model_codes, titles)
-        per_model_matrices.append((adapter.name, matrix))
+        with write_lock:
+            # A sqlite3 connection belongs to the thread that created it, so a
+            # worker cannot reuse the run's connection — it opens its own for
+            # the write and closes it again. The lock still serialises writers,
+            # which keeps this correct in file mode and in the shared-cache
+            # in-memory mode the deployed app uses.
+            wconn = storage.init_db(config.DB_PATH)
+            try:
+                storage.write_results_csv(
+                    out / f"results_{_slug(adapter.name)}{suffix}.csv", hits)
+                storage.insert_coding_results(wconn, run_id, adapter.name, hits)
+                storage.write_matrix_csv(
+                    out / f"countmatrix_{_slug(adapter.name)}{suffix}.csv",
+                    matrix, model_codes, titles)
+                storage.insert_count_matrix(wconn, run_id, adapter.name, matrix,
+                                            model_codes, titles)
+            finally:
+                wconn.close()
+            per_model_matrices.append((adapter.name, matrix))
+        print(f"  done: {adapter.name} ({len(hits)} occurrence(s))", flush=True)
+
+    # Models are independent of one another, so with several of them the run is
+    # bounded by wall-clock time spent waiting on APIs, not by anything local.
+    # Sequential stays the default: it keeps the log readable and the request
+    # rate low, which is what a single-model run wants.
+    if model_concurrency > 1 and len(adapters) > 1:
+        workers = min(model_concurrency, len(adapters))
+        print(f"  running {len(adapters)} model(s), {workers} at a time")
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(code_with, a): a for a in adapters}
+            for fut in as_completed(futures):
+                # Surface a worker that died outright; a failed CODE is already
+                # handled above, so reaching here means the model itself broke.
+                exc = fut.exception()
+                if exc is not None:
+                    print(f"  ! model {futures[fut].name} aborted: "
+                          f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+    else:
+        for adapter in adapters:
+            print(f"  coding with {adapter.name} ...")
+            code_with(adapter)
+
+    # Deterministic order regardless of which model finished first, so the
+    # majority vote and the CSVs do not depend on network timing.
+    order = {a.name: i for i, a in enumerate(adapters)}
+    per_model_matrices.sort(key=lambda pair: order.get(pair[0], 0))
 
     # 6. Majority vote -------------------------------------------------------
     majority = majority_vote([m for _, m in per_model_matrices], code_names, titles)
@@ -158,12 +309,19 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
               file=sys.stderr)
         sys.exit(1)
 
-    code_to_gt = match_codes(code_names, gt_code_names)
+    code_to_gt = match_codes(code_names, gt_code_names,
+                             aliases=config.GT_CODE_ALIASES)
+    aliased = {c: g for c, g in code_to_gt.items()
+               if c in config.GT_CODE_ALIASES and g != c}
+    if aliased:
+        print(f"  {len(aliased)} code(s) mapped to a renamed ground-truth row "
+              f"(config.GT_CODE_ALIASES): "
+              + ", ".join(f"{c!r} -> {g!r}" for c, g in aliased.items()))
     unmatched = [c for c, g in code_to_gt.items() if g is None]
     if unmatched:
-        print(f"  WARNING: {len(unmatched)} code(s) had no ground-truth match and are "
-              f"scored against an all-absent human row, which makes their kappa "
-              f"meaningless: {unmatched}")
+        print(f"  WARNING: {len(unmatched)} code(s) have no row in the ground-truth "
+              f"export and are reported as UNSCORED (excluded from the average, not "
+              f"counted as zero agreement): {unmatched}")
     kappa_rows = []
     scored = per_model_matrices + [("majority_vote", majority)]
     for model_name, matrix in scored:
@@ -195,8 +353,14 @@ def _print_kappa_summary(kappa_rows, doc_pairs) -> None:
     for model, krs in by_model.items():
         scored = [k.kappa for k in krs if not (isinstance(k.kappa, float) and k.kappa != k.kappa)]
         meets = sum(1 for k in scored if k > config.KAPPA_TARGET)
+        agg = mean_kappa(krs)
+        mean_txt = "n/a" if agg["mean"] is None else f"{agg['mean']:.4f}"
+        median_txt = "n/a" if agg["median"] is None else f"{agg['median']:.4f}"
         print(f"    {model}: {len(scored)} codes scored, "
               f"{meets} above kappa>{config.KAPPA_TARGET}")
+        print(f"      mean kappa (unweighted across codes) = {mean_txt}  "
+              f"[median {median_txt}, n={agg['n_scored']}, "
+              f"unscored {agg['n_unscored']}]")
 
 
 def main() -> None:
@@ -206,6 +370,27 @@ def main() -> None:
     p.add_argument("--max-docs", type=int, default=None,
                    help="Only process the first N sampled docs (debug/validation).")
     p.add_argument("--label", default="", help="Suffix for output filenames/run id.")
+    p.add_argument("--definitions", choices=("codebook", "current"), default="codebook",
+                   help="Which definition text to code with: the original "
+                        "Codebook.xlsx ('codebook', default) or each code's current "
+                        "reviewer-edited version from the definitions store "
+                        "('current'). These answer different questions — see "
+                        "load_current_definitions.")
+    p.add_argument("--resume-run-id", default=None,
+                   help="Append these models to an EXISTING run instead of "
+                        "starting a new one. Use after a run was interrupted "
+                        "(e.g. an API quota ceiling) so the completed models are "
+                        "not re-coded. Score afterwards with score_run.py.")
+    p.add_argument("--model-concurrency", type=int, default=1,
+                   help="How many MODELS to run at once (default 1, "
+                        "sequential). Models are independent and the run "
+                        "is API-latency bound, so >1 shortens a "
+                        "multi-model run proportionally.")
+    p.add_argument("--definitions-db", default=None,
+                   help="SQLite file holding code_definitions, for "
+                        "--definitions=current. Defaults to config.DB_PATH. Opened "
+                        "read-only (an in-memory copy), so an archived database is "
+                        "safe to point at.")
     p.add_argument("--validate-only", action="store_true",
                    help="Cross-check the inputs and exit without calling any model.")
     p.add_argument("--skip-validate", action="store_true",
@@ -224,7 +409,10 @@ def main() -> None:
     if args.validate_only:
         return
 
-    run(max_codes=args.max_codes, max_docs=args.max_docs, label=args.label)
+    run(max_codes=args.max_codes, max_docs=args.max_docs, label=args.label,
+        definitions=args.definitions, definitions_db=args.definitions_db,
+        model_concurrency=args.model_concurrency,
+        resume_run_id=args.resume_run_id)
 
 
 if __name__ == "__main__":

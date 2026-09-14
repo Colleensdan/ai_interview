@@ -106,6 +106,86 @@ def _headers() -> tuple[str, dict]:
 
 # --- write ------------------------------------------------------------------
 
+#: Above this size a single PUT stops being reliable — Microsoft's own guidance
+#: is to use an upload session past ~4 MB, and in practice a ~19 MB body over a
+#: slow link times out mid-write. The failure is not silent (the item is left
+#: untouched), but it does mean the sync never lands.
+LARGE_UPLOAD_THRESHOLD = 4 * 1024 * 1024
+#: Chunk size for session uploads. Graph requires a multiple of 320 KiB.
+UPLOAD_CHUNK = 5 * 320 * 1024
+
+
+def _upload_session(remote_path: str, content: bytes) -> str | None:
+    """Upload via a resumable session, for payloads too big for one PUT.
+
+    Note the weaker concurrency guarantee: an upload session takes a conflict
+    behaviour, not an ``If-Match`` ETag, so this cannot fail cleanly on a
+    concurrent writer the way :func:`upload_bytes` does. Callers that care
+    (``sync_to_live.py``) re-check the ETag immediately before starting the
+    session, take a backup first, and verify the content afterwards.
+    """
+    drive_id, headers = _headers()
+    path = remote_path.strip("/")
+    r = requests.post(
+        f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/createUploadSession",
+        headers={**headers, "Content-Type": "application/json"},
+        json={"item": {"@microsoft.graph.conflictBehavior": "replace"}},
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise SharePointError(
+            f"Could not open an upload session for '{remote_path}' "
+            f"({r.status_code}): {r.text[:300]}")
+    url = r.json()["uploadUrl"]
+
+    total = len(content)
+    sent = 0
+    try:
+        while sent < total:
+            chunk = content[sent:sent + UPLOAD_CHUNK]
+            end = sent + len(chunk) - 1
+            last_exc = None
+            for attempt in range(4):        # chunks are individually retryable
+                try:
+                    cr = requests.put(
+                        url, data=chunk, timeout=180,
+                        headers={"Content-Length": str(len(chunk)),
+                                 "Content-Range": f"bytes {sent}-{end}/{total}"})
+                except requests.RequestException as exc:
+                    last_exc = exc
+                    time.sleep(2 ** attempt)
+                    continue
+                if cr.status_code in (200, 201, 202):
+                    if cr.status_code in (200, 201):
+                        try:
+                            return cr.json().get("eTag")
+                        except ValueError:
+                            return None
+                    break
+                if cr.status_code in (408, 429, 500, 502, 503, 504):
+                    last_exc = SharePointError(
+                        f"chunk {sent}-{end} HTTP {cr.status_code}")
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SharePointError(
+                    f"Upload of '{remote_path}' failed on bytes {sent}-{end} "
+                    f"({cr.status_code}): {cr.text[:300]}")
+            else:
+                raise SharePointError(
+                    f"Upload of '{remote_path}' gave up on bytes {sent}-{end}: "
+                    f"{last_exc}")
+            sent += len(chunk)
+    except Exception:
+        # Abandon the session so a failed run does not leave one open against
+        # the item; best-effort, the service expires them anyway.
+        try:
+            requests.delete(url, timeout=30)
+        except requests.RequestException:
+            pass
+        raise
+    return etag(remote_path)
+
+
 def upload_bytes(remote_path: str, content: bytes, if_match: str | None = None) -> str | None:
     """Upload *content* to drive-root-relative *remote_path* (folders auto-created).
 
@@ -114,7 +194,22 @@ def upload_bytes(remote_path: str, content: bytes, if_match: str | None = None) 
     otherwise Graph returns 412 and we raise :class:`PreconditionFailed`. Passing
     ``if_match="*"`` requires the item to already exist. Returns the new ETag of
     the uploaded item (or ``None`` if Graph didn't report one).
+
+    Payloads over :data:`LARGE_UPLOAD_THRESHOLD` are routed to a resumable
+    upload session instead, which is the only thing that works at that size.
+    Sessions cannot carry ``If-Match``, so the ETag is verified immediately
+    before the session opens rather than enforced by the service — see
+    :func:`_upload_session`.
     """
+    if len(content) > LARGE_UPLOAD_THRESHOLD:
+        if if_match:
+            current = etag(remote_path)
+            if current is not None and current != if_match:
+                raise PreconditionFailed(
+                    f"Upload of '{remote_path}' precondition failed: remote is at "
+                    f"ETag {current!r}, expected {if_match!r}")
+        return _upload_session(remote_path, content)
+
     drive_id, headers = _headers()
     path = remote_path.strip("/")
     url = f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/content"

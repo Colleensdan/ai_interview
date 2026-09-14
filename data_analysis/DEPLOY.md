@@ -33,6 +33,7 @@ Non-secret (already in `render.yaml`, override if needed):
 | `AICODE_SHAREPOINT_DIR` | the input folder in SharePoint |
 | `AICODE_SHAREPOINT_STATE_DIR` | **set this explicitly** — see below |
 | `CJBS_DEPLOYMENT_NAME` | `gpt-5-mini` (pinned — not a secret; keep it matching the data) |
+| `AICODE_MODELS` | leave **unset** — unset means "code with `CJBS_DEPLOYMENT_NAME` only", which is the current behaviour. Setting it switches the run to a different model set (see README, *Models*). |
 | `PYTHON_VERSION` | `3.13.4` |
 
 > **`AICODE_MEMORY_DB=1` is not optional.** Without it the app takes the

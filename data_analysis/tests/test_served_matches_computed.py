@@ -29,7 +29,7 @@ def _rows():
     # check would pass on tidy fixtures and fail on real values.
     return [
         (MODEL, KappaResult("anger/irritation", 0.91, 10, 5, 5)),
-        (MODEL, KappaResult("worry", 1 / 3, 10, 6, 3)),
+        (MODEL, KappaResult("frustration", 1 / 3, 10, 6, 3)),
         (MODEL, KappaResult("disapproval", float("nan"), 10, 0, 0)),
     ]
 
@@ -110,6 +110,27 @@ def test_kappa_target_drives_the_csv_header_and_the_overview(mem_db, tmp_path, m
     conn.close()
     overview = DataStore(InputStore(from_disk=True)).overview(MODEL)
     assert overview["target"] == 0.5
-    # worry = 0.42 fails at 0.5 but would pass a lower bar; anger = 0.91 passes.
-    assert "worry" in [e["code"] for e in overview["fail"]]
+    # frustration = 0.33 fails at 0.5 but would pass a lower bar; anger = 0.91 passes.
+    assert "frustration" in [e["code"] for e in overview["fail"]]
     assert "anger/irritation" in [e["code"] for e in overview["success"]]
+
+
+def test_withdrawn_codes_are_not_served(mem_db, monkeypatch):
+    """A code excluded from the codebook must not come back through kappa.
+
+    `worry` was withdrawn in the 2026-09 ground-truth export, but the kappa row
+    from the August run that scored it stays in the table, and the "most recent
+    per code" lookup returns whatever is newest for that code -- which, for a
+    code nothing has scored since, is that stale row.
+    """
+    monkeypatch.setattr(config, "EXCLUDED_CODES", ["worry"])
+    conn = storage.init_db(config.DB_PATH)
+    storage.insert_kappa(conn, "run_old", [
+        (MODEL, KappaResult("worry", 0.2346, 10, 3, 3)),
+        (MODEL, KappaResult("frustration", 0.81, 10, 5, 5)),
+    ])
+    conn.close()
+
+    served = DataStore(InputStore(from_disk=True)).latest_kappa(MODEL)
+    assert "frustration" in served, "a live code should still be served"
+    assert "worry" not in served, "a withdrawn code leaked back into the app"

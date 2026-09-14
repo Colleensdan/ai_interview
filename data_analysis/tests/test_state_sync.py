@@ -241,3 +241,25 @@ def test_csv_mirror_uploaded_with_readable_content(fake_sp):
     assert kappa_path in fake_sp.files
     khead = list(csv.reader(io.StringIO(fake_sp.files[kappa_path][0].decode())))[0]
     assert khead[:3] == ["Model", "Code", "Cohen's kappa"]
+
+
+def test_kappa_csv_omits_excluded_codes(fake_sp, monkeypatch):
+    """The published mirror must not average in a withdrawn code.
+
+    This export runs its own query rather than going through the app's read
+    path, so it needs its own exclusion guard. Without it the mirror published
+    to SharePoint disagreed with the app and with the reported analysis.
+    """
+    monkeypatch.setattr(config, "EXCLUDED_CODES", ["worry"])
+    _seed_db()
+    c = db.connect()
+    c.execute("INSERT INTO kappa(run_id,model,code_name,kappa,n_documents,"
+              "n_human_present,n_llm_present) VALUES ('r0','m','worry',0.23,7,3,3)")
+    c.commit()
+    c.close()
+
+    state_sync.push_state()
+    content = fake_sp.files[state_sync._csv_remote("kappa.csv")][0].decode()
+    codes = [r["Code"] for r in csv.DictReader(io.StringIO(content))]
+    assert "A: trust" in codes, "a live code should still be exported"
+    assert "worry" not in codes, "a withdrawn code leaked into the published CSV"

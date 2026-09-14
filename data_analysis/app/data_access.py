@@ -14,6 +14,7 @@ import re
 import sqlite3
 
 import config
+from pipeline.agreement import mean_kappa
 from pipeline.interviews import doc_key
 from pipeline.quote_sheets import QuoteIndex, build_quote_index
 from .inputs import InputStore
@@ -97,13 +98,26 @@ class DataStore:
 
     # --- kappa -------------------------------------------------------------
     def latest_kappa(self, model: str) -> dict[str, float | None]:
-        """Most recent kappa per code for a model (reflects re-analyses)."""
+        """Most recent kappa per code for a model (reflects re-analyses).
+
+        Excluded codes are omitted. An excluded code is never sent to a model,
+        so any kappa still stored against it comes from a run that predates its
+        exclusion -- `worry` was withdrawn from the codebook, but its August
+        score survives in the table and MAX(id) happily returns it. Left in, a
+        withdrawn code follows every caller downstream: it dragged the CSV
+        mirror's averages below the figures the analysis reports, and got seeded
+        onto the code's definition row at boot. Filtering at the source fixes
+        each caller at once rather than relying on each to remember.
+        """
+        excluded = tuple(config.EXCLUDED_CODES)
+        sql = ("SELECT code_name, kappa FROM kappa k WHERE model=? AND id=("
+               "  SELECT MAX(id) FROM kappa WHERE model=? AND code_name=k.code_name)")
+        params: tuple = (model, model)
+        if excluded:
+            sql += f" AND code_name NOT IN ({','.join('?' * len(excluded))})"
+            params += excluded
         with self._conn() as c:
-            rows = c.execute(
-                "SELECT code_name, kappa FROM kappa k WHERE model=? AND id=("
-                "  SELECT MAX(id) FROM kappa WHERE model=? AND code_name=k.code_name)",
-                (model, model),
-            ).fetchall()
+            rows = c.execute(sql, params).fetchall()
         return {r["code_name"]: r["kappa"] for r in rows}
 
     def overview(self, model: str) -> dict:
@@ -133,6 +147,13 @@ class DataStore:
         total = len(success) + len(fail)
         success.sort(key=lambda e: e["code"])
         fail.sort(key=lambda e: (e["kappa"] is None, e["kappa"] if e["kappa"] is not None else 0))
+
+        # Headline agreement figure: the unweighted mean across codes. Computed
+        # from the same per-code kappas the two columns are built from, so the
+        # number on the home page can always be reconciled against the list
+        # under it. See pipeline.agreement.mean_kappa for why unweighted.
+        agg = mean_kappa(e["kappa"] for e in success + fail)
+
         return {
             "model": model,
             "target": target,
@@ -141,6 +162,10 @@ class DataStore:
             "n_fail": len(fail),
             "pct_success": round(100 * len(success) / total, 1) if total else 0.0,
             "pct_fail": round(100 * len(fail) / total, 1) if total else 0.0,
+            "mean_kappa": None if agg["mean"] is None else round(agg["mean"], 3),
+            "median_kappa": None if agg["median"] is None else round(agg["median"], 3),
+            "n_kappa_scored": agg["n_scored"],
+            "n_kappa_unscored": agg["n_unscored"],
             "success": success,
             "fail": fail,
             # Named so the exclusion is visible rather than looking like codes

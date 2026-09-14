@@ -238,9 +238,9 @@ def _export_csv_mirror() -> None:
         conn.close()
 
 
-def _safe_query(conn, sql: str):
+def _safe_query(conn, sql: str, params: tuple = ()):
     try:
-        return conn.execute(sql).fetchall()
+        return conn.execute(sql, params).fetchall()
     except sqlite3.OperationalError:
         return None  # table not created yet
 
@@ -258,10 +258,19 @@ def _upload_definitions_csv(conn) -> None:
 
 
 def _upload_kappa_csv(conn) -> None:
-    rows = _safe_query(conn,
-        "SELECT model, code_name, kappa, n_documents, n_human_present, n_llm_present "
-        "FROM kappa k WHERE id=(SELECT MAX(id) FROM kappa "
-        "WHERE model=k.model AND code_name=k.code_name) ORDER BY model, code_name")
+    # Excluded codes are filtered out for the same reason DataStore.latest_kappa
+    # filters them: a code withdrawn from the codebook can still have a kappa row
+    # from an earlier run, and MAX(id) returns it. This export is a separate
+    # query from the app's read path, so it needs the guard of its own -- without
+    # it the published averages sit below the ones the analysis reports.
+    excluded = tuple(config.EXCLUDED_CODES)
+    sql = ("SELECT model, code_name, kappa, n_documents, n_human_present, n_llm_present "
+           "FROM kappa k WHERE id=(SELECT MAX(id) FROM kappa "
+           "WHERE model=k.model AND code_name=k.code_name)")
+    if excluded:
+        sql += f" AND code_name NOT IN ({','.join('?' * len(excluded))})"
+    sql += " ORDER BY model, code_name"
+    rows = _safe_query(conn, sql, excluded)
     if rows is None:
         return
     out = []

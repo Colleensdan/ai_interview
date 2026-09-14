@@ -113,7 +113,27 @@ function renderStart(root) {
   const o = S.overview;
   const wrap = el("div", { class: "start" });
 
+  // Mean kappa leads the row: it is the one number that describes the codebook
+  // as a whole, where the tiles beside it only count codes either side of the
+  // target. Unweighted mean across codes — see pipeline/agreement.mean_kappa.
+  const meanTile = el("div", { class: "kpi headline" },
+    o.mean_kappa === null
+      ? el("div", { class: "big unscored" }, "—")
+      : el("div", {
+          class: "big",
+          style: `color: ${o.mean_kappa > o.target ? "var(--green)" : "var(--red)"}`,
+        }, o.mean_kappa.toFixed(3)),
+    el("div", { class: "lbl" }, "mean κ across codes"),
+    el("div", { class: "sub" },
+      o.mean_kappa === null
+        ? "No code could be scored against the ground truth."
+        : `unweighted mean of ${o.n_kappa_scored} code${o.n_kappa_scored === 1 ? "" : "s"}`
+          + (o.median_kappa === null ? "" : `  ·  median ${o.median_kappa.toFixed(3)}`)
+          + (o.n_kappa_unscored
+              ? `  ·  ${o.n_kappa_unscored} unscored (no ground-truth row)` : "")));
+
   wrap.append(el("div", { class: "kpi-row" },
+    meanTile,
     el("div", { class: "kpi success" },
       el("div", { class: "big" }, `${o.n_success}`),
       el("div", { class: "lbl" }, `codes at κ > ${o.target}  ·  ${o.pct_success}%`)),
@@ -128,9 +148,14 @@ function renderStart(root) {
   // Codes deliberately not sent to the model. Stated rather than omitted, so
   // the codebook total and the scored total don't look like a discrepancy.
   if ((o.excluded || []).length) {
+    // Two distinct reasons live in this list (see config.EXCLUDED_CODES): codes
+    // describing the chatbot rather than the participant, and codes the human
+    // coders withdrew from the ground truth. Naming only the first would
+    // mislabel the second, so the wording covers both.
     wrap.append(el("div", { class: "notice" },
       `${o.excluded.length} code(s) excluded from coding and κ — they describe `
-      + `the chatbot's own behaviour, not the participant's answers: `
+      + `the chatbot's own behaviour rather than the participant's answers, or `
+      + `the human coders withdrew them from the ground truth: `
       + o.excluded.join(", ")));
   }
 

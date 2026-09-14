@@ -23,6 +23,11 @@ class TruncatedResponseError(RuntimeError):
     """
 
 
+# Speaker scope for a code: whose turns the model may apply it to.
+SCOPE_INTERVIEWEE = "interviewee"
+SCOPE_INTERVIEWER = "interviewer"
+
+
 @dataclass(frozen=True)
 class CodeHit:
     """One occurrence of a code the model found in one document.
@@ -47,6 +52,10 @@ class CodingRequest:
     # Titles of the documents present in merged_document, so an adapter can
     # validate / constrain the titles it returns.
     document_titles: tuple[str, ...]
+    # Which speaker's turns this code may be applied to. Defaults to the
+    # participant, which is every substantive code; a procedural code that
+    # describes the interviewer's own behaviour sets SCOPE_INTERVIEWER.
+    scope: str = SCOPE_INTERVIEWEE
 
 
 class ModelAdapter(ABC):

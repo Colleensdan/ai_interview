@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import config
 from app.quotes import build_norm, locate
+from pipeline.agreement import match_codes
 from pipeline.codebook import load_codebook
 from pipeline.ground_truth import load_ground_truth_table
 from pipeline.interviews import load_interviews
@@ -78,13 +79,36 @@ def validate(check_quote_locations: bool = True) -> Report:
                    f"{len(table.doc_keys)} documents in count matrix")
 
     # --- codes line up both ways ------------------------------------------
-    missing_from_counts = [c for c in code_names if c not in table.counts]
-    missing_from_codebook = [c for c in table.counts if c not in set(code_names)]
+    # Resolved through the same alias map the scoring uses, so a code the humans
+    # merely RENAMED between exports doesn't read here as a missing code.
+    resolved = match_codes(code_names, list(table.counts),
+                           aliases=config.GT_CODE_ALIASES)
+    aliased = {c: g for c, g in resolved.items()
+               if g is not None and c != g and c in config.GT_CODE_ALIASES}
+    claimed = {g for g in resolved.values() if g is not None}
+
+    # Deliberately-excluded codes are never coded or scored, so a missing human
+    # row for one of them is the expected state, not a divergence to report.
+    excluded = set(config.EXCLUDED_CODES)
+    missing_from_counts = sorted(
+        c for c, g in resolved.items() if g is None and c not in excluded)
+    missing_from_codebook = sorted(c for c in table.counts if c not in claimed)
+
+    if aliased:
+        r.lines.append("")
+        r.lines.append("Renamed codes resolved via config.GT_CODE_ALIASES:")
+        for c, g in sorted(aliased.items()):
+            r.lines.append(f"  - {c!r} -> {g!r}")
     if missing_from_counts:
-        r.problems.append(
-            f"{len(missing_from_counts)} codebook code(s) absent from the count "
-            f"matrix — they would score kappa against an all-absent human row: "
-            f"{_fmt(missing_from_counts)}")
+        # Not a blocking problem: these are reported as UNSCORED and excluded
+        # from the mean (pipeline.agreement.per_code_kappa), so they can no
+        # longer produce a misleading kappa. It is still a codebook/ground-truth
+        # divergence a researcher should decide about, so it is stated plainly.
+        r.notes.append(
+            f"{len(missing_from_counts)} codebook code(s) have no row in the count "
+            f"matrix. They are scored as UNSCORED — excluded from the mean kappa, "
+            f"not counted as zero agreement. Either the humans dropped them or the "
+            f"codebook is ahead of the export: {_fmt(missing_from_counts)}")
     if missing_from_codebook:
         r.problems.append(
             f"{len(missing_from_codebook)} counted code(s) absent from the "

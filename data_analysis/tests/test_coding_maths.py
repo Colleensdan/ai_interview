@@ -12,7 +12,13 @@ from __future__ import annotations
 import math
 
 from models.base import CodeHit
-from pipeline.agreement import cohen_kappa, match_codes, per_code_kappa
+from pipeline.agreement import (
+    KappaResult,
+    cohen_kappa,
+    match_codes,
+    mean_kappa,
+    per_code_kappa,
+)
 from pipeline.matrices import build_count_matrix, majority_vote
 
 
@@ -121,3 +127,87 @@ def test_majority_vote_takes_the_modal_count():
     b = {"worry": {"d.txt": 1}}
     c = {"worry": {"d.txt": 5}}
     assert majority_vote([a, b, c], ["worry"], ["d.txt"])["worry"]["d.txt"] == 1
+
+
+# --- renamed / dropped ground-truth codes ------------------------------------
+#
+# The 2026-09 ground-truth export renamed one code and dropped another. Both
+# cases silently corrupt kappa if unhandled, and the second one corrupts it
+# UPWARDS, which is the dangerous direction.
+
+def test_alias_maps_a_renamed_ground_truth_code():
+    """A rename is below any safe fuzzy cutoff, so it needs an explicit alias."""
+    got = match_codes(
+        ["information seeking/increased awareness"],
+        ["information seeking/increased attention"],
+        aliases={"information seeking/increased awareness":
+                 "information seeking/increased attention"},
+    )
+    assert got["information seeking/increased awareness"] == \
+        "information seeking/increased attention"
+
+
+def test_alias_is_ignored_when_its_target_is_absent_from_the_export():
+    """A stale alias must not resurrect a code the humans really dropped."""
+    assert match_codes(["a"], ["b"], aliases={"a": "gone"})["a"] is None
+
+
+def test_code_with_no_ground_truth_row_is_unscored_not_perfect():
+    """The failure mode this guards against.
+
+    A code the humans dropped has an all-absent human vector. If the model also
+    never applies it, the two vectors are identical constants and cohen_kappa
+    returns 1.0 — a perfect score for a code that cannot be scored at all, which
+    would then inflate the mean kappa on the home page. It must come back as
+    unscored instead.
+    """
+    docs = [(f"d{i}", f"d{i}") for i in range(6)]
+    res = per_code_kappa(["dropped"], {}, {"dropped": {}}, docs,
+                         {"dropped": None})[0]
+    assert math.isnan(res.kappa)
+    assert res.no_ground_truth is True
+    # The trap it avoids:
+    assert cohen_kappa([0] * 6, [0] * 6) == 1.0
+
+
+def test_code_present_in_ground_truth_is_still_scored_normally():
+    """The unscored path must not swallow codes that DO have a human row."""
+    docs = [("d0", "d0"), ("d1", "d1")]
+    res = per_code_kappa(["real"], {"real": {"d0": 1}}, {"real": {"d0": 1}},
+                         docs, {"real": "real"})[0]
+    assert res.no_ground_truth is False
+    assert res.kappa == 1.0
+
+
+# --- mean kappa across codes -------------------------------------------------
+
+def test_mean_kappa_is_the_unweighted_mean_and_median():
+    got = mean_kappa([0.2, 0.4, 0.9])
+    assert abs(got["mean"] - 0.5) < 1e-12
+    assert abs(got["median"] - 0.4) < 1e-12
+    assert got["n_scored"] == 3 and got["n_unscored"] == 0
+    assert got["min"] == 0.2 and got["max"] == 0.9
+
+
+def test_mean_kappa_median_of_an_even_count_averages_the_middle_pair():
+    assert abs(mean_kappa([0.0, 1.0, 0.4, 0.6])["median"] - 0.5) < 1e-12
+
+
+def test_mean_kappa_excludes_undefined_rather_than_calling_them_zero():
+    """Coercing NaN to 0 would invent an observation and depress the headline."""
+    got = mean_kappa([0.5, float("nan"), None, 0.7])
+    assert abs(got["mean"] - 0.6) < 1e-12
+    assert got["n_scored"] == 2 and got["n_unscored"] == 2
+
+
+def test_mean_kappa_accepts_kappa_results():
+    got = mean_kappa([KappaResult("x", 0.8, 10, 5, 5),
+                      KappaResult("y", float("nan"), 10, 0, 0, True)])
+    assert abs(got["mean"] - 0.8) < 1e-12
+    assert got["n_scored"] == 1 and got["n_unscored"] == 1
+
+
+def test_mean_kappa_with_nothing_scorable_reports_none_not_zero():
+    got = mean_kappa([float("nan"), None])
+    assert got["mean"] is None and got["median"] is None
+    assert got["n_scored"] == 0 and got["n_unscored"] == 2

@@ -64,6 +64,22 @@ CREATE TABLE IF NOT EXISTS kappa (
     n_human_present INTEGER,
     n_llm_present INTEGER
 );
+
+-- What each run actually was. Exists so that publishing to the live app can be
+-- gated on fact rather than on a naming convention: a partial run (--max-codes
+-- / --max-docs) produces kappas over a truncated code or document set, and
+-- pushing those to the app would show reviewers numbers that look like the real
+-- thing. ``is_full`` is the flag the sync tool refuses on.
+CREATE TABLE IF NOT EXISTS runs (
+    run_id       TEXT PRIMARY KEY,
+    label        TEXT,
+    is_full      INTEGER NOT NULL,
+    n_codes      INTEGER,
+    n_documents  INTEGER,
+    definitions  TEXT,          -- 'codebook' | 'current'
+    models       TEXT,          -- comma-separated adapter names
+    created_at   TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -74,6 +90,25 @@ def init_db(db_path: str | Path) -> sqlite3.Connection:
     conn.executescript(_SCHEMA)
     conn.commit()
     return conn
+
+
+# --- run metadata -----------------------------------------------------------
+
+def record_run(conn, run_id: str, *, label: str, is_full: bool, n_codes: int,
+               n_documents: int, definitions: str, models: list[str]) -> None:
+    """Record what this run covered, so downstream tools need not guess.
+
+    ``is_full`` is False whenever the run was scope-limited, which is what
+    ``sync_to_live.py`` refuses to publish.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO runs "
+        "(run_id, label, is_full, n_codes, n_documents, definitions, models) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (run_id, label, 1 if is_full else 0, n_codes, n_documents,
+         definitions, ",".join(models)),
+    )
+    conn.commit()
 
 
 # --- coding results ---------------------------------------------------------
