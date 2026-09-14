@@ -127,6 +127,16 @@ def write_results_csv(path: str | Path, hits: list[CodeHit]) -> None:
 def insert_coding_results(
     conn: sqlite3.Connection, run_id: str, model: str, hits: list[CodeHit]
 ) -> None:
+    """Write these hits, replacing anything already stored for their codes.
+
+    Keyed on the codes present in *hits*, so a per-code write replaces only that
+    code. A code that found nothing contributes no hits and so clears nothing --
+    its emptiness is recorded in the count matrix instead.
+    """
+    conn.executemany(
+        "DELETE FROM coding_results WHERE run_id=? AND model=? AND code_name=?",
+        [(run_id, model, c) for c in {h.code_name for h in hits}],
+    )
     conn.executemany(
         "INSERT INTO coding_results "
         "(run_id, model, document_title, code_name, quote, reason) "
@@ -163,6 +173,16 @@ def _matrix_rows(matrix: Matrix, code_names, documents):
 def insert_count_matrix(
     conn, run_id, model, matrix, code_names, documents
 ) -> None:
+    """Write these codes' counts for one model, replacing any already stored.
+
+    Scoped to the codes being written, so this can be called once per code as a
+    run progresses without a later call wiping earlier ones. Replacing rather
+    than appending makes re-coding a single code idempotent.
+    """
+    conn.executemany(
+        "DELETE FROM count_matrix WHERE run_id=? AND model=? AND code_name=?",
+        [(run_id, model, c) for c in code_names],
+    )
     conn.executemany(
         "INSERT INTO count_matrix (run_id, model, code_name, document, count) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -172,6 +192,13 @@ def insert_count_matrix(
 
 
 def insert_majority_matrix(conn, run_id, matrix, code_names, documents) -> None:
+    """Write the run's majority vote, replacing any vote already stored for it.
+
+    Replace rather than append: a resumed run and every re-score recompute this
+    table for the same run_id, and a plain INSERT silently stacks copies. Six
+    copies had accumulated for the 2026-09-06 run before this was caught.
+    """
+    conn.execute("DELETE FROM majority_vote_matrix WHERE run_id=?", (run_id,))
     conn.executemany(
         "INSERT INTO majority_vote_matrix (run_id, code_name, document, count) "
         "VALUES (?, ?, ?, ?)",
@@ -217,6 +244,14 @@ def write_kappa_csv(path: str | Path, rows: list[tuple[str, KappaResult]]) -> No
 
 
 def insert_kappa(conn, run_id, rows: list[tuple[str, KappaResult]]) -> None:
+    """Write the run's kappa, replacing any kappa already stored for it.
+
+    Same reason as :func:`insert_majority_matrix`. Appending left a resumed run
+    holding two majority votes -- the original one and the one computed over
+    only the models the resume happened to code -- and the run summary averaged
+    the two into a figure that matched neither.
+    """
+    conn.execute("DELETE FROM kappa WHERE run_id=?", (run_id,))
     conn.executemany(
         "INSERT INTO kappa "
         "(run_id, model, code_name, kappa, n_documents, n_human_present, n_llm_present) "
@@ -233,3 +268,38 @@ def insert_kappa(conn, run_id, rows: list[tuple[str, KappaResult]]) -> None:
 
 def _isnan(x) -> bool:
     return isinstance(x, float) and x != x
+
+
+def load_count_matrices(conn, run_id: str) -> dict[str, dict]:
+    """Every model's count matrix for a run: {model: {code: {document: count}}}.
+
+    Lets a resumed run take its majority vote over all the models the run holds,
+    not just the ones the current invocation coded.
+    """
+    out: dict[str, dict] = {}
+    for model, code, doc, n in conn.execute(
+            "SELECT model, code_name, document, count FROM count_matrix "
+            "WHERE run_id=?", (run_id,)):
+        out.setdefault(model, {}).setdefault(code, {})[doc] = n
+    return out
+
+
+def codes_already_coded(conn, run_id: str, model: str) -> set[str]:
+    """Codes this model has already stored for this run.
+
+    The count matrix is dense -- a code that found nothing still has a row per
+    document -- so a code appears here whether or not it produced occurrences.
+    That is what lets an interrupted run resume at the code it stopped on
+    instead of paying for the whole model again.
+    """
+    return {r[0] for r in conn.execute(
+        "SELECT DISTINCT code_name FROM count_matrix WHERE run_id=? AND model=?",
+        (run_id, model))}
+
+
+def load_coding_results(conn, run_id: str, model: str) -> list[CodeHit]:
+    """Every occurrence stored for one model in one run, in insertion order."""
+    return [CodeHit(document_title=r[0], code_name=r[1], quote=r[2], reason=r[3])
+            for r in conn.execute(
+                "SELECT document_title, code_name, quote, reason FROM coding_results "
+                "WHERE run_id=? AND model=? ORDER BY id", (run_id, model))]

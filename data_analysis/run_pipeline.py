@@ -191,16 +191,36 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     write_lock = threading.Lock()
 
     def code_with(adapter):
-        """Run every code through one model, then persist that model's results.
+        """Code every outstanding code through one model, persisting as it goes.
 
-        Persisting inside the worker (under a lock) rather than after every
-        model finishes keeps the original durability property: a crash or an
-        interrupt loses only the model still in flight, not the hours of work
-        already done by the others.
+        Each code is written the moment it completes, and codes already stored
+        for this run are skipped, so an interruption costs at most the one code
+        in flight. Before this, nothing was persisted until a model finished all
+        49, and a model stopped at code 30 lost everything -- a real cost when a
+        weekly token allowance runs out mid-model.
+
+        Writes happen inside the worker under a lock: a sqlite3 connection
+        belongs to the thread that created it, so a worker opens its own.
         """
         prefix = f"[{adapter.name}]"
+        # Resume at code level. Every completed code is persisted as it lands, so
+        # an interrupted model keeps its work instead of paying for all 49 again
+        # -- which matters when the weekly token allowance runs out mid-model.
+        with write_lock:
+            rconn = storage.init_db(config.DB_PATH)
+            try:
+                done = storage.codes_already_coded(rconn, run_id, adapter.name)
+            finally:
+                rconn.close()
+        todo = [c for c in codes if c.name not in done]
+        if done:
+            print(f"  {prefix} resuming: {len(done)} code(s) already stored, "
+                  f"{len(todo)} to go", flush=True)
+        if not todo:
+            print(f"  {prefix} already complete for this run; nothing to code.",
+                  flush=True)
         hits = []
-        for i, code in enumerate(codes, 1):
+        for i, code in enumerate(todo, 1):
             t0 = time.time()
             try:
                 code_hits = code_across_batches(
@@ -213,18 +233,39 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                 # which would look like a real (and very poor) result.
                 with write_lock:
                     failed.setdefault(adapter.name, []).append(code.name)
-                print(f"    ! {prefix} [{i}/{len(codes)}] {code.name}: FAILED after "
+                print(f"    ! {prefix} [{i}/{len(todo)}] {code.name}: FAILED after "
                       f"{time.time() - t0:.0f}s ({type(exc).__name__}: {exc}); "
                       f"excluded from this run.", flush=True)
                 continue
             hits.extend(code_hits)
-            print(f"    {prefix} [{i}/{len(codes)}] {code.name}: "
+            # Persist immediately: a model killed at code 30 keeps 29 codes.
+            with write_lock:
+                wconn = storage.init_db(config.DB_PATH)
+                try:
+                    storage.insert_count_matrix(
+                        wconn, run_id, adapter.name,
+                        build_count_matrix(code_hits, [code.name], titles),
+                        [code.name], titles)
+                    if code_hits:
+                        storage.insert_coding_results(
+                            wconn, run_id, adapter.name, code_hits)
+                finally:
+                    wconn.close()
+            print(f"    {prefix} [{i}/{len(todo)}] {code.name}: "
                   f"{len(code_hits)} occurrence(s) ({time.time() - t0:.0f}s)",
                   flush=True)
 
-        model_codes = [c for c in code_names
-                       if c not in set(failed.get(adapter.name, []))]
-        matrix = build_count_matrix(hits, model_codes, titles)
+        # Read back what the run now holds for this model: with a resume that
+        # includes codes an earlier invocation coded, which `hits` does not.
+        with write_lock:
+            rconn = storage.init_db(config.DB_PATH)
+            try:
+                matrix = storage.load_count_matrices(
+                    rconn, run_id).get(adapter.name, {})
+                all_hits = storage.load_coding_results(rconn, run_id, adapter.name)
+            finally:
+                rconn.close()
+        model_codes = [c for c in code_names if c in matrix]
         with write_lock:
             # A sqlite3 connection belongs to the thread that created it, so a
             # worker cannot reuse the run's connection — it opens its own for
@@ -234,17 +275,14 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
             wconn = storage.init_db(config.DB_PATH)
             try:
                 storage.write_results_csv(
-                    out / f"results_{_slug(adapter.name)}{suffix}.csv", hits)
-                storage.insert_coding_results(wconn, run_id, adapter.name, hits)
+                    out / f"results_{_slug(adapter.name)}{suffix}.csv", all_hits)
                 storage.write_matrix_csv(
                     out / f"countmatrix_{_slug(adapter.name)}{suffix}.csv",
                     matrix, model_codes, titles)
-                storage.insert_count_matrix(wconn, run_id, adapter.name, matrix,
-                                            model_codes, titles)
             finally:
                 wconn.close()
             per_model_matrices.append((adapter.name, matrix))
-        print(f"  done: {adapter.name} ({len(hits)} occurrence(s))", flush=True)
+        print(f"  done: {adapter.name} ({len(all_hits)} occurrence(s) stored for this run)", flush=True)
 
     # Models are independent of one another, so with several of them the run is
     # bounded by wall-clock time spent waiting on APIs, not by anything local.
@@ -273,7 +311,21 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     per_model_matrices.sort(key=lambda pair: order.get(pair[0], 0))
 
     # 6. Majority vote -------------------------------------------------------
-    majority = majority_vote([m for _, m in per_model_matrices], code_names, titles)
+    # A resumed run must vote over EVERY model the run holds, not just the ones
+    # this invocation coded. Voting over the current invocation alone replaced a
+    # seven-model vote with a two-model one, which scored below several of its
+    # own members and was not obviously wrong on sight.
+    voting = dict(per_model_matrices)
+    if resume_run_id:
+        prior_matrices = storage.load_count_matrices(conn, run_id)
+        for name, matrix in prior_matrices.items():
+            voting.setdefault(name, matrix)
+        added = [n for n in prior_matrices if n not in dict(per_model_matrices)]
+        if added:
+            print(f"  majority vote includes {len(added)} model(s) coded earlier "
+                  f"in this run: {', '.join(sorted(added))}")
+    voters = sorted(voting.items())
+    majority = majority_vote([m for _, m in voters], code_names, titles)
     storage.write_matrix_csv(out / f"countmatrix_majority{suffix}.csv",
                              majority, code_names, titles)
     storage.insert_majority_matrix(conn, run_id, majority, code_names, titles)
@@ -323,11 +375,16 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
               f"export and are reported as UNSCORED (excluded from the average, not "
               f"counted as zero agreement): {unmatched}")
     kappa_rows = []
-    scored = per_model_matrices + [("majority_vote", majority)]
+    # Score every model the run holds, not only this invocation's: insert_kappa
+    # replaces the run's rows, so scoring a subset would drop the rest.
+    scored = voters + [("majority_vote", majority)]
     for model_name, matrix in scored:
         # A code that errored for this model has no coding to compare against;
-        # scoring it would report a confident kappa for work never done.
-        model_codes = [c for c in code_names if c not in set(failed.get(model_name, []))]
+        # scoring it would report a confident kappa for work never done. A model
+        # carried over from an earlier invocation has no `failed` entry here, so
+        # its completed codes are read from its own matrix instead.
+        model_codes = [c for c in code_names
+                       if c in matrix and c not in set(failed.get(model_name, []))]
         for kr in per_code_kappa(model_codes, gt_counts, matrix, doc_pairs, code_to_gt):
             kappa_rows.append((model_name, kr))
     storage.write_kappa_csv(out / f"kappa{suffix}.csv", kappa_rows)
