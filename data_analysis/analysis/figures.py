@@ -299,21 +299,29 @@ def current_style() -> str:
     return _style
 
 
-def _headline(ax, fig, key: str, **fmt) -> None:
-    """Render title / subtitle / caption for *key* in the active style."""
+def _headline(ax, fig, key: str, *, extra: str = "", **fmt) -> None:
+    """Render title / subtitle / caption for *key* in the active style.
+
+    *extra* is appended to the caption rather than drawn as a second one. Both
+    caption writers place text at a fixed figure position, so a second call
+    overprints the first: the figure ends up with two captions superimposed and
+    neither legible. A caller with a conditional note passes it here.
+    """
     entry = TEXT[key][_style]
     title = entry["title"].format(**fmt)
+    cap = entry.get("caption", "")
+    cap = cap.format(**fmt) if cap else ""
+    if extra:
+        cap = f"{cap} {extra.strip()}".strip()
     if _style == PUBLICATION:
         _fig_label(ax, title)
-        cap = entry.get("caption", "")
         if cap:
-            _numbered_caption(fig, cap.format(**fmt))
+            _numbered_caption(fig, cap)
         return
     sub = entry.get("subtitle", "").format(**fmt)
     _titles(ax, title, sub, pad=entry.get("pad", 26))
-    cap = entry.get("caption", "")
     if cap:
-        _caption(fig, cap.format(**fmt))
+        _caption(fig, cap)
 
 
 def _titles(ax, title: str, subtitle: str = "", *, pad: float = 22.0) -> None:
@@ -452,19 +460,15 @@ def fig_kappa_by_model(kf, stats, path):
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0, -0.09),
               ncol=4, fontsize=9.5, handlelength=1.2)
 
-    # The publication caption in TEXT already states the undefined-kappa rule, so
-    # only the presentation style carries the extra note here; adding it in both
-    # printed one caption on top of the other.
+    # Appended to the caption by _headline rather than drawn separately: two
+    # caption calls land at the same figure coordinates and overprint.
     extra = ""
     if partial:
         extra = (" Greyed models did not complete the code set and are shown "
                  "for completeness only; they are scored on a smaller set of "
                  "codes and are excluded from all other figures.")
-    _headline(ax, fig, "kappa_by_model", n_docs=kf.n_documents,
+    _headline(ax, fig, "kappa_by_model", extra=extra, n_docs=kf.n_documents,
               n_codes=len(kf.complete_codes()))
-    if extra:
-        _numbered_caption(fig, extra.strip()) if current_style() == PUBLICATION \
-            else _caption(fig, extra.strip())
     fig.savefig(path)
     plt.close(fig)
     return path
