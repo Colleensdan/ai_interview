@@ -244,14 +244,20 @@ def write_kappa_csv(path: str | Path, rows: list[tuple[str, KappaResult]]) -> No
 
 
 def insert_kappa(conn, run_id, rows: list[tuple[str, KappaResult]]) -> None:
-    """Write the run's kappa, replacing any kappa already stored for it.
+    """Write kappa, replacing only the (model, code) pairs being written.
 
-    Same reason as :func:`insert_majority_matrix`. Appending left a resumed run
-    holding two majority votes -- the original one and the one computed over
-    only the models the resume happened to code -- and the run summary averaged
-    the two into a figure that matched neither.
+    Appending left a resumed run holding two majority votes -- the original and
+    one computed over just the models the resume coded -- and the summary
+    averaged them into a figure matching neither. Replacing the *whole run* was
+    the wrong correction: an invocation that scores a subset of codes then
+    deletes every other code's kappa, which is how scoring the five procedural
+    codes wiped 49 codes of results for seven models. Scope the replace to what
+    is actually being rewritten, as the count-matrix write already does.
     """
-    conn.execute("DELETE FROM kappa WHERE run_id=?", (run_id,))
+    conn.executemany(
+        "DELETE FROM kappa WHERE run_id=? AND model=? AND code_name=?",
+        [(run_id, model, r.code_name) for model, r in rows],
+    )
     conn.executemany(
         "INSERT INTO kappa "
         "(run_id, model, code_name, kappa, n_documents, n_human_present, n_llm_present) "

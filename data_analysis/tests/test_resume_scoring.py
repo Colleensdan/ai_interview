@@ -64,3 +64,27 @@ def test_load_count_matrices_returns_every_model_in_the_run(mem_db):
     assert got["model_one"]["c1"]["d1"] == 1
     assert "model_three" not in got, "another run's models must not leak in"
     conn.close()
+
+
+def test_scoring_a_subset_of_codes_leaves_the_rest_alone(mem_db):
+    """Replacing the whole run was the wrong fix for the duplicate-vote bug.
+
+    Scoring the five procedural codes deleted 49 codes of kappa for seven
+    models. Coding is expensive and scoring is free, so it was recoverable --
+    but only because the count matrices survived.
+    """
+    conn = storage.init_db(config.DB_PATH)
+    storage.insert_kappa(conn, "run_a", [
+        ("m1", KappaResult("anger/irritation", 0.71, 104, 5, 5)),
+        ("m1", KappaResult("frustration", 0.65, 104, 5, 5)),
+    ])
+    # a later invocation scores only one, newly added, code
+    storage.insert_kappa(conn, "run_a", [
+        ("m1", KappaResult("finished", 0.98, 104, 63, 63)),
+    ])
+    got = {r[0]: r[1] for r in conn.execute(
+        "SELECT code_name, kappa FROM kappa WHERE run_id='run_a' AND model='m1'")}
+    assert sorted(got) == ["anger/irritation", "finished", "frustration"], \
+        f"scoring one code destroyed the others: {sorted(got)}"
+    assert got["anger/irritation"] == 0.71
+    conn.close()
