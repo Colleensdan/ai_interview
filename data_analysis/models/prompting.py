@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 
+import config
+
 from .base import SCOPE_INTERVIEWER, CodeHit, CodingRequest
 
 SYSTEM_PROMPT = (
@@ -61,6 +63,19 @@ def build_user_prompt(request: CodingRequest) -> str:
     re-prompt the 49 substantive ones.
     """
     scope = _INTERVIEWER_SCOPE if request.scope == SCOPE_INTERVIEWER else ""
+    if config.PROMPT_ORDER == "documents_first":
+        # Everything before CODE NAME is identical for every code in a batch, so
+        # it forms a cacheable prefix. The document titles belong in it: they
+        # describe the batch, not the code. Nothing dynamic may ever be added
+        # above this line or the prefix stops matching and caching silently dies.
+        return (
+            "INTERVIEW DOCUMENTS:\n"
+            f"{request.merged_document}\n\n"
+            f"Valid document titles: {list(request.document_titles)}\n\n"
+            f"CODE NAME: {request.code_name}\n"
+            f"CODE DEFINITION: {request.code_description}\n"
+            f"{scope}"
+        )
     return (
         f"CODE NAME: {request.code_name}\n"
         f"CODE DEFINITION: {request.code_description}\n"

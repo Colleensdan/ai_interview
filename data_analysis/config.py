@@ -143,6 +143,22 @@ NON_CODE_SHEETS = {
     if s.strip()
 }
 
+# Where the code name and definition sit relative to the transcripts.
+#
+#   code_first       (default) — the order every run to date has used. The code
+#                    name and definition lead, so no two calls share a prefix
+#                    beyond the 311-token system prompt and prompt caching never
+#                    engages: the corpus is re-sent at full price once per code.
+#   documents_first  — transcripts and titles lead, code name and definition
+#                    trail. Everything ahead of the code is identical across all
+#                    codes in a batch, so one call writes the cache and the rest
+#                    read it at about a tenth of the price: ~85% off billed input.
+#
+# Kept switchable because moving the definition to the end changes what the
+# model reads last before answering, which can move kappa. Default stays on the
+# order the reported results were produced with until an A/B says otherwise.
+PROMPT_ORDER = os.getenv("AICODE_PROMPT_ORDER", "code_first")
+
 # Codes excluded from LLM coding and from kappa. Two codes remain, for two
 # different reasons; the chatbot-behaviour codes that were once listed here were
 # reinstated on 2026-09-14 (see PROCEDURAL_CODES below).

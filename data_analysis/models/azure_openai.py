@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import config
 from .base import CodeHit, CodingRequest, ModelAdapter, TruncatedResponseError
+from . import usage
 from .prompting import (
     SYSTEM_PROMPT as _SYSTEM_PROMPT,
     build_user_prompt,
@@ -118,6 +119,7 @@ class AzureOpenAIAdapter(ModelAdapter):
                 {"role": "user", "content": build_user_prompt(request)},
             ]
         )
+        usage.record_openai(self.name, getattr(resp, "usage", None))
         choice = resp.choices[0]
         content = choice.message.content or ""
         # A truncated answer is not an empty answer. Surfacing it lets the

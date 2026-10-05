@@ -23,6 +23,7 @@ import time
 import config
 from .base import CodeHit, CodingRequest, ModelAdapter, TruncatedResponseError
 from .catalog import ModelSpec, get_spec
+from . import usage
 from .prompting import SYSTEM_PROMPT, build_user_prompt, parse_occurrences
 
 
@@ -128,6 +129,7 @@ class GatewayOpenAIAdapter(ModelAdapter):
                 {"role": "user", "content": build_user_prompt(request)},
             ]
         )
+        usage.record_openai(self.name, getattr(resp, "usage", None))
         choice = resp.choices[0]
         content = choice.message.content or ""
         if choice.finish_reason == "length":
@@ -240,6 +242,7 @@ class GatewayAnthropicAdapter(ModelAdapter):
         # There is no JSON mode on this API. The system prompt already demands a
         # bare JSON object, and parse_occurrences copes with a ```json fence or
         # surrounding prose, which is how a Claude model typically deviates.
+        usage.record_anthropic(self.name, data.get("usage"))
         parts = data.get("content") or []
         content = "".join(
             p.get("text", "") for p in parts

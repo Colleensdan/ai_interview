@@ -393,6 +393,15 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     conn.close()
 
     # Console summary --------------------------------------------------------
+    # Token usage, so a caching claim can be checked rather than asserted.
+    from models import usage as _usage
+    _u = _usage.summary()
+    if _u:
+        print(f"\n  token usage (prompt order: {config.PROMPT_ORDER})")
+        for _m, _t in sorted(_u.items()):
+            print(f"    {_m:34s} {_t['calls']:>4} calls  "
+                  f"in {_t['prompt']:>10,}  out {_t['completion']:>8,}  "
+                  f"cached {_t['cached']:>10,} ({_t['cache_hit_rate']:.0%})")
     print(f"\n[run {run_id}] done. Outputs in {out}")
     for model_name, names in failed.items():
         print(f"  WARNING: {model_name} failed on {len(names)} code(s), which are "
