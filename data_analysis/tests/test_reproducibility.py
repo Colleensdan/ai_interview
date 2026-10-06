@@ -529,3 +529,30 @@ def test_sync_refuses_an_unpublishable_run_before_touching_sharepoint(pipeline_e
     monkeypatch.setattr(sys, "argv", ["sync_to_live.py", "--run-id", run_id, "--dry-run"])
     with pytest.raises(SystemExit, match=r"(?s)Refusing to publish.*has not coded 1 of 2"):
         sync_to_live.main()
+
+
+def test_re_scoring_with_score_run_stores_exactly_what_the_pipeline_stored(pipeline_env, monkeypatch):
+    """score_run used its own vote, so re-scoring could change stored results."""
+    import sys
+    import score_run
+    import verify_run
+    monkeypatch.setattr(pipeline_env, "available_adapters",
+                        lambda: [_Model("m1"), _Model("m2", always_malformed=set()),
+                                 _Model("m3")])
+    pipeline_env.run(label="rescore", max_codes=3)
+    conn = storage.init_db(config.DB_PATH)
+    run_id = _latest_run(conn)
+    before = sorted(conn.execute("SELECT model, code_name, kappa, n_documents, "
+                                 "n_human_present, n_llm_present FROM kappa "
+                                 "WHERE run_id=?", (run_id,)).fetchall())
+    vote_before = sorted(conn.execute("SELECT code_name, document, count FROM "
+                                      "majority_vote_matrix WHERE run_id=?", (run_id,)).fetchall())
+    monkeypatch.setattr(sys, "argv", ["score_run.py", "--run-id", run_id])
+    assert score_run.main() == 0
+    after = sorted(conn.execute("SELECT model, code_name, kappa, n_documents, "
+                                "n_human_present, n_llm_present FROM kappa "
+                                "WHERE run_id=?", (run_id,)).fetchall())
+    vote_after = sorted(conn.execute("SELECT code_name, document, count FROM "
+                                     "majority_vote_matrix WHERE run_id=?", (run_id,)).fetchall())
+    assert after == before and vote_after == vote_before
+    assert verify_run.verify(conn, run_id).ok

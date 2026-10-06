@@ -251,6 +251,9 @@ def verify(conn: sqlite3.Connection, run_id: str, definitions_db=None,
     code_names = mm["codes"]
     code_to_gt = match_codes(code_names, list(gt_counts),
                              aliases=config.GT_CODE_ALIASES)
+    recorded_rule = last.get("vote_rule", "count_plurality")
+    r.note(f"vote rule: stored results were scored by an invocation recording "
+           f"{recorded_rule!r}; recomputing with {scoring.VOTE_RULE!r}")
     majority, rows = scoring.score(sorted(stored.items()), code_names, titles,
                                    doc_pairs, gt_counts, code_to_gt)
     want = {(m, kr.code_name): kr for m, kr in rows}

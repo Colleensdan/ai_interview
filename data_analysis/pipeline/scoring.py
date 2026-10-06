@@ -8,7 +8,7 @@ copy of this logic is how two scripts came to disagree about the majority vote.
 from __future__ import annotations
 
 from pipeline.agreement import per_code_kappa
-from pipeline.matrices import majority_vote
+from pipeline.matrices import VOTE_RULE, majority_vote  # noqa: F401  (re-exported)
 
 MAJORITY = "majority_vote"
 
@@ -17,9 +17,9 @@ def score(voters, code_names, titles, doc_pairs, gt_counts, code_to_gt,
           failed=None):
     """``(majority_matrix, kappa_rows)`` for a run.
 
-    *voters* is ``[(model, matrix)]`` for every model the run holds. The vote is
-    over every voter that coded a cell (``majority_vote`` skips a model lacking
-    the code); each model is scored only on codes in its own matrix and not in
+    *voters* is ``[(model, matrix)]`` for every model the run holds. The vote
+    follows ``VOTE_RULE`` (presence majority) over every model that coded the
+    code; each model is scored only on codes in its own matrix and not in
     ``failed[model]`` -- scoring a code it never coded would report a confident
     kappa for work never done.
     """

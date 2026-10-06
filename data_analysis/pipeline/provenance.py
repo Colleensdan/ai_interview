@@ -94,6 +94,7 @@ def build(*, codes, sample, adapters, definitions: str, definitions_src,
           definitions_max_version) -> dict:
     """The provenance record for one invocation."""
     from models.prompting import PARSER_VERSION, SYSTEM_PROMPT, _INTERVIEWER_SCOPE
+    from pipeline.matrices import VOTE_RULE
 
     must_match = {
         "parser_version": PARSER_VERSION,
@@ -130,6 +131,7 @@ def build(*, codes, sample, adapters, definitions: str, definitions_src,
         "ground_truth_quotes_sha256": sha256_file(config.GROUND_TRUTH_QUOTES_PATH),
         "gt_code_aliases": dict(sorted(config.GT_CODE_ALIASES.items())),
         "procedural_codes": sorted(config.PROCEDURAL_CODES),
+        "vote_rule": VOTE_RULE,
         "transient_retry_attempts": config.TRANSIENT_RETRY_ATTEMPTS,
         "max_concurrent_calls": config.MAX_CONCURRENT_CALLS,
         "models": [_adapter_spec(a) for a in adapters],

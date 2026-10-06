@@ -122,11 +122,56 @@ def test_build_count_matrix_ignores_hits_outside_the_declared_axes():
     assert m["worry"]["a.txt"] == 0
 
 
-def test_majority_vote_takes_the_modal_count():
-    a = {"worry": {"d.txt": 1}}
-    b = {"worry": {"d.txt": 1}}
-    c = {"worry": {"d.txt": 5}}
-    assert majority_vote([a, b, c], ["worry"], ["d.txt"])["worry"]["d.txt"] == 1
+def _votes(*counts, code="worry", doc="d.txt"):
+    """One single-cell matrix per model; None = the model did not code it."""
+    return [{code: {doc: n}} if n is not None else {} for n in counts]
+
+
+def _vote(*counts):
+    return majority_vote(_votes(*counts), ["worry"], ["d.txt"]).get("worry", {}).get("d.txt")
+
+
+def test_majority_vote_is_a_majority_on_presence_not_the_modal_count():
+    """5 of 9 models found the code; the old modal-count rule said absent
+    because the 'present' votes were split across 1, 2 and 3."""
+    assert _vote(0, 0, 0, 0, 1, 1, 2, 2, 3) == 1
+
+
+def test_a_minority_finding_the_code_is_absent():
+    assert _vote(0, 0, 0, 0, 0, 1, 1, 2, 3) == 0
+
+
+def test_an_exact_tie_is_absent():
+    assert _vote(0, 0, 0, 0, 1, 1, 1, 1) == 0
+
+
+def test_the_vote_cell_is_presence_not_a_count():
+    assert _vote(5, 5, 7) == 1
+
+
+def test_a_model_that_did_not_code_the_code_is_not_a_voter():
+    """Counting a FAILED code as 'absent' would pull the vote toward absent."""
+    assert _vote(1, 1, None) == 1
+    assert _vote(1, 0, None) == 0          # 1 of 2 voters: a tie, so absent
+
+
+def test_a_code_no_model_coded_has_no_vote_at_all():
+    assert "worry" not in majority_vote([{}, {}], ["worry"], ["d.txt"])
+
+
+def test_with_one_model_the_vote_is_its_presence():
+    assert _vote(3) == 1 and _vote(0) == 0
+
+
+def test_a_code_without_a_vote_is_never_scored_for_the_vote():
+    from pipeline.agreement import KappaResult  # noqa: F401
+    from pipeline import scoring
+    voters = [("m1", {"worry": {"d.txt": 1}})]
+    _, rows = scoring.score(voters, ["worry", "trust"], ["d.txt"], [("d.txt", "d")],
+                            {"worry": {"d": 1}, "trust": {"d": 1}},
+                            {"worry": "worry", "trust": "trust"})
+    assert {(m, k.code_name) for m, k in rows} == {("m1", "worry"),
+                                                   ("majority_vote", "worry")}
 
 
 # --- renamed / dropped ground-truth codes ------------------------------------

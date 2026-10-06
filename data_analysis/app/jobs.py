@@ -202,8 +202,9 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
 
         if len(per_model_matrices) > 1:
             maj = majority_vote([m for _, m in per_model_matrices], codes, titles)
-            storage.insert_majority_matrix(conn, run_id, maj, codes, titles)
-            krs = per_code_kappa(codes, gt_counts, maj, doc_pairs, code_to_gt)
+            voted = [c for c in codes if c in maj]
+            storage.insert_majority_matrix(conn, run_id, maj, voted, titles)
+            krs = per_code_kappa(voted, gt_counts, maj, doc_pairs, code_to_gt)
             storage.insert_kappa(conn, run_id, [(MAJORITY, kr) for kr in krs])
         conn.close()
 

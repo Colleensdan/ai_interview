@@ -411,9 +411,12 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                   f"in this run: {', '.join(sorted(added))}")
     voters = sorted(voting.items())
     majority = majority_vote([m for _, m in voters], code_names, titles)
+    # Only codes some model coded have a vote (see majority_vote). Cells are
+    # presence (1/0) under the presence-majority rule, not counts.
+    voted = [c for c in code_names if c in majority]
     storage.write_matrix_csv(out / f"countmatrix_majority{suffix}.csv",
-                             majority, code_names, titles)
-    storage.insert_majority_matrix(conn, run_id, majority, code_names, titles)
+                             majority, voted, titles)
+    storage.insert_majority_matrix(conn, run_id, majority, voted, titles)
 
     # 7. Human ground-truth matrix (its own table) --------------------------
     gt_counts, gt_keys = load_ground_truth_counts(
