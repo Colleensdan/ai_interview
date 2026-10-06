@@ -80,6 +80,51 @@ CREATE TABLE IF NOT EXISTS runs (
     models       TEXT,          -- comma-separated adapter names
     created_at   TEXT DEFAULT (datetime('now'))
 );
+
+-- Every model reply, verbatim, one row per request attempt -- accepted or not.
+-- The count matrix must be re-derivable from these rows alone (verify_run.py
+-- checks that it is), so a published kappa can be audited down to the text
+-- the model returned. ``final`` marks the accepted replies that produced the
+-- stored results for their code; earlier attempts stay, with final=0, so every
+-- request made is accounted for. Local only: sync_to_live.py does not copy it.
+CREATE TABLE IF NOT EXISTS raw_responses (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          TEXT NOT NULL,
+    invocation_id   TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    code_name       TEXT NOT NULL,
+    code_attempt    TEXT NOT NULL,   -- one id per time a code is coded
+    batch_label     TEXT NOT NULL,   -- "2", or "2.0"/"2.1" after a split
+    document_titles TEXT NOT NULL,   -- JSON list, in prompt order
+    prompt_sha256   TEXT NOT NULL,   -- of system prompt + user prompt
+    attempt         INTEGER NOT NULL,
+    outcome         TEXT NOT NULL,   -- accepted|malformed|truncated|error
+    detail          TEXT,
+    finish_reason   TEXT,
+    params          TEXT,            -- JSON: request parameters actually sent
+    prompt_tokens   INTEGER,
+    completion_tokens INTEGER,
+    content         TEXT,
+    final           INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS raw_responses_key
+    ON raw_responses (run_id, model, code_name);
+
+-- One row per run_pipeline invocation (a resume is a new invocation of the
+-- same run). Records exactly what produced the results: code version, input
+-- fingerprints, and the settings that change model behaviour or parsing.
+CREATE TABLE IF NOT EXISTS run_invocations (
+    invocation_id TEXT PRIMARY KEY,
+    run_id        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    git_commit    TEXT,
+    git_dirty     INTEGER,
+    models        TEXT,
+    argv          TEXT,
+    provenance    TEXT NOT NULL      -- JSON, see run_pipeline.provenance()
+);
 """
 
 
@@ -125,17 +170,20 @@ def write_results_csv(path: str | Path, hits: list[CodeHit]) -> None:
 
 
 def insert_coding_results(
-    conn: sqlite3.Connection, run_id: str, model: str, hits: list[CodeHit]
+    conn: sqlite3.Connection, run_id: str, model: str, hits: list[CodeHit],
+    code_names=None,
 ) -> None:
     """Write these hits, replacing anything already stored for their codes.
 
-    Keyed on the codes present in *hits*, so a per-code write replaces only that
-    code. A code that found nothing contributes no hits and so clears nothing --
-    its emptiness is recorded in the count matrix instead.
+    Pass *code_names* to say which codes are being rewritten. Without it the
+    scope is inferred from the codes present in *hits* -- which means a code
+    re-coded to zero hits would keep its OLD quotes while its count matrix said
+    zero. Every per-code writer must pass it.
     """
+    scope = set(code_names) if code_names is not None else {h.code_name for h in hits}
     conn.executemany(
         "DELETE FROM coding_results WHERE run_id=? AND model=? AND code_name=?",
-        [(run_id, model, c) for c in {h.code_name for h in hits}],
+        [(run_id, model, c) for c in scope],
     )
     conn.executemany(
         "INSERT INTO coding_results "
@@ -309,3 +357,98 @@ def load_coding_results(conn, run_id: str, model: str) -> list[CodeHit]:
             for r in conn.execute(
                 "SELECT document_title, code_name, quote, reason FROM coding_results "
                 "WHERE run_id=? AND model=? ORDER BY id", (run_id, model))]
+
+
+# --- provenance --------------------------------------------------------------
+
+def record_invocation(conn, *, invocation_id: str, run_id: str, started_at: str,
+                      git_commit: str | None, git_dirty: bool | None,
+                      models: list[str], argv: list[str], provenance: dict) -> None:
+    import json
+    conn.execute(
+        "INSERT INTO run_invocations (invocation_id, run_id, started_at, "
+        "git_commit, git_dirty, models, argv, provenance) VALUES (?,?,?,?,?,?,?,?)",
+        (invocation_id, run_id, started_at, git_commit,
+         None if git_dirty is None else int(git_dirty), ",".join(models),
+         json.dumps(argv), json.dumps(provenance, sort_keys=True)))
+    conn.commit()
+
+
+def finish_invocation(conn, invocation_id: str, finished_at: str) -> None:
+    conn.execute("UPDATE run_invocations SET finished_at=? WHERE invocation_id=?",
+                 (finished_at, invocation_id))
+    conn.commit()
+
+
+def invocations(conn, run_id: str) -> list[dict]:
+    """Every recorded invocation of a run, oldest first."""
+    import json
+    rows = conn.execute(
+        "SELECT invocation_id, started_at, finished_at, git_commit, git_dirty, "
+        "models, argv, provenance FROM run_invocations WHERE run_id=? "
+        "ORDER BY started_at, invocation_id", (run_id,)).fetchall()
+    keys = ("invocation_id", "started_at", "finished_at", "git_commit",
+            "git_dirty", "models", "argv", "provenance")
+    out = []
+    for r in rows:
+        d = dict(zip(keys, r))
+        d["provenance"] = json.loads(d["provenance"])
+        out.append(d)
+    return out
+
+
+def insert_raw_response(conn, *, run_id: str, invocation_id: str, model: str,
+                        code_name: str, code_attempt: str, batch_label: str,
+                        document_titles, prompt_sha256: str, attempt: int,
+                        outcome: str, detail: str = "", reply=None) -> None:
+    import json
+    conn.execute(
+        "INSERT INTO raw_responses (run_id, invocation_id, model, code_name, "
+        "code_attempt, batch_label, document_titles, prompt_sha256, attempt, "
+        "outcome, detail, finish_reason, params, prompt_tokens, "
+        "completion_tokens, content) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (run_id, invocation_id, model, code_name, code_attempt, batch_label,
+         json.dumps(list(document_titles)), prompt_sha256, attempt, outcome,
+         detail or None,
+         getattr(reply, "finish_reason", None),
+         json.dumps(getattr(reply, "params", None) or {}, sort_keys=True)
+         if reply is not None else None,
+         getattr(reply, "prompt_tokens", None),
+         getattr(reply, "completion_tokens", None),
+         getattr(reply, "content", None)))
+    conn.commit()
+
+
+def persist_code(conn, run_id: str, model: str, code_name: str, matrix,
+                 documents, hits: list[CodeHit], code_attempt: str | None) -> None:
+    """Store one completed code atomically: counts, quotes, and replies' status.
+
+    One transaction, so a crash can never leave a code whose count matrix is
+    written (which makes resume treat it as done) but whose quotes are not, or
+    whose replies are not marked as the ones that produced it. Re-coding a code
+    replaces all three, including clearing old quotes when it now has none.
+    """
+    with conn:
+        conn.execute("DELETE FROM count_matrix WHERE run_id=? AND model=? AND code_name=?",
+                     (run_id, model, code_name))
+        conn.executemany(
+            "INSERT INTO count_matrix (run_id, model, code_name, document, count) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(run_id, model, c, d, n)
+             for c, d, n in _matrix_rows(matrix, [code_name], documents)])
+        conn.execute("DELETE FROM coding_results WHERE run_id=? AND model=? AND code_name=?",
+                     (run_id, model, code_name))
+        conn.executemany(
+            "INSERT INTO coding_results "
+            "(run_id, model, document_title, code_name, quote, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(run_id, model, h.document_title, h.code_name, h.quote, h.reason)
+             for h in hits])
+        conn.execute("UPDATE raw_responses SET final=0 "
+                     "WHERE run_id=? AND model=? AND code_name=?",
+                     (run_id, model, code_name))
+        if code_attempt is not None:
+            conn.execute("UPDATE raw_responses SET final=1 WHERE run_id=? AND "
+                         "model=? AND code_name=? AND code_attempt=? AND "
+                         "outcome='accepted'",
+                         (run_id, model, code_name, code_attempt))

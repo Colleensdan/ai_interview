@@ -191,7 +191,8 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
                 avg = sum(durations) / len(durations)
                 eta = avg * (total - done)
                 _update_job(job_id, done=done, eta_seconds=round(eta, 1))
-            storage.insert_coding_results(conn, run_id, adapter.name, hits)
+            storage.insert_coding_results(conn, run_id, adapter.name, hits,
+                                          code_names=codes)
             matrix = build_count_matrix(hits, codes, titles)
             storage.insert_count_matrix(conn, run_id, adapter.name, matrix, codes, titles)
             per_model_matrices.append((adapter.name, matrix))

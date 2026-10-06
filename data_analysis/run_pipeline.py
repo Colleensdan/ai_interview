@@ -14,22 +14,25 @@ Everything is driven by config.py (paths, sample fraction, seed, Azure creds).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 
 import config
 from models import available_adapters
-from pipeline.agreement import match_codes, mean_kappa, per_code_kappa
+from pipeline.agreement import match_codes, mean_kappa
 from pipeline.codebook import load_codebook
-from pipeline.coding import code_across_batches, make_batches
+from pipeline.coding import code_across_batches, make_batches, returns_raw
 from pipeline.ground_truth import load_ground_truth_counts
 from pipeline.interviews import load_interviews, select_sample
 from pipeline.matrices import build_count_matrix, majority_vote
-from pipeline import storage
+from pipeline import provenance, scoring, storage
+from models.prompting import SYSTEM_PROMPT, build_user_prompt
 
 
 def _slug(name: str) -> str:
@@ -68,30 +71,21 @@ def load_current_definitions(db_path) -> dict[str, str]:
     return {r["code_name"]: (r["definition"], r["version"]) for r in rows}
 
 
-def _note(msg: str) -> None:
-    print(msg, flush=True)
+def load_codes(definitions: str = "codebook", definitions_db=None):
+    """The codes to run, with the definition text each will be coded with.
 
-
-def run(max_codes: int | None = None, max_docs: int | None = None, label: str = "",
-        definitions: str = "codebook", definitions_db=None,
-        model_concurrency: int = 1, resume_run_id: str | None = None) -> dict:
-    out = config.ensure_output_dir()
-    # Resuming appends this invocation's models to an EXISTING run. External
-    # limits (a quota ceiling, a dropped connection) can stop a multi-model run
-    # part-way, and without this the only way to add the missing models is to
-    # re-code the ones that already succeeded — paying twice for identical work
-    # and, worse, splitting one experiment across two run ids that can no longer
-    # be compared as a single matrix.
-    run_id = resume_run_id or (
-        time.strftime("%Y%m%d_%H%M%S") + (f"_{label}" if label else ""))
-    suffix = f"_{label}" if label else ""
-
-    # 1. Inputs --------------------------------------------------------------
+    Returns ``(codes, definitions_src, definitions_max_version)``. Shared with
+    verify_run.py so a run is checked against inputs rebuilt by exactly the
+    logic that produced it.
+    """
     codes = load_codebook(config.CODEBOOK_PATH)
+    defs_src, defs_max_version = None, None
 
     if definitions == "current":
         src = definitions_db or config.DB_PATH
         current = load_current_definitions(src)
+        defs_src = src
+        defs_max_version = max((v for _, v in current.values()), default=None)
         applied = [c for c in codes if c.name in current
                    and current[c.name][0] != c.definition]
         codes = [
@@ -119,6 +113,30 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     if not codes:
         print("Every code is excluded — nothing to code.", file=sys.stderr)
         sys.exit(1)
+    return codes, defs_src, defs_max_version
+
+
+def _note(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def run(max_codes: int | None = None, max_docs: int | None = None, label: str = "",
+        definitions: str = "codebook", definitions_db=None,
+        model_concurrency: int = 1, resume_run_id: str | None = None,
+        allow_dirty: bool = False) -> dict:
+    out = config.ensure_output_dir()
+    # Resuming appends this invocation's models to an EXISTING run. External
+    # limits (a quota ceiling, a dropped connection) can stop a multi-model run
+    # part-way, and without this the only way to add the missing models is to
+    # re-code the ones that already succeeded — paying twice for identical work
+    # and, worse, splitting one experiment across two run ids that can no longer
+    # be compared as a single matrix.
+    run_id = resume_run_id or (
+        time.strftime("%Y%m%d_%H%M%S") + (f"_{label}" if label else ""))
+    suffix = f"_{label}" if label else ""
+
+    # 1. Inputs --------------------------------------------------------------
+    codes, defs_src, defs_max_version = load_codes(definitions, definitions_db)
     if max_codes:
         codes = codes[:max_codes]
     code_names = [c.name for c in codes]
@@ -136,6 +154,36 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
         print("No model adapters are available (no credentials). Aborting.",
               file=sys.stderr)
         sys.exit(1)
+
+    # Provenance ---------------------------------------------------------------
+    # Everything that shapes a request or how its reply is read, fingerprinted
+    # BEFORE any model is called, so a mismatched resume or an unreproducible
+    # full run is refused rather than discovered later.
+    is_full = max_codes is None and max_docs is None
+    invocation_id = uuid.uuid4().hex
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    prov = provenance.build(codes=codes, sample=sample, adapters=adapters,
+                            definitions=definitions, definitions_src=defs_src,
+                            definitions_max_version=defs_max_version)
+    commit, dirty = prov["info"]["git_commit"], prov["info"]["git_dirty"]
+    if is_full:
+        no_raw = [a.name for a in adapters if not returns_raw(a)]
+        if no_raw:
+            print(f"Refusing a full run: {no_raw} cannot return raw replies, so "
+                  f"their results could not be audited.", file=sys.stderr)
+            sys.exit(1)
+        if (dirty or commit is None) and not allow_dirty:
+            print("Refusing a full run from code that is not committed "
+                  f"(commit={commit}, uncommitted changes={dirty}). A published "
+                  "result must be traceable to the exact code that produced it. "
+                  "Commit first, or pass --allow-dirty for a run you will not "
+                  "publish (it is recorded either way).", file=sys.stderr)
+            sys.exit(1)
+    print(f"  provenance: commit {(commit or 'unknown')[:12]}"
+          f"{' (UNCOMMITTED CHANGES)' if dirty else ''}, parser "
+          f"v{prov['must_match']['parser_version']}, definitions "
+          f"{prov['must_match']['definitions_sha256'][:12]}, sample "
+          f"{prov['must_match']['sample_sha256'][:12]}")
 
     conn = storage.init_db(config.DB_PATH)
 
@@ -159,6 +207,21 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
             print(f"Refusing to append a scope-limited model set to full run "
                   f"{run_id!r}.", file=sys.stderr)
             sys.exit(1)
+        # Everything that shapes a request or its parsing must match the run's
+        # first invocation; otherwise one run silently mixes two experiments.
+        prior_invs = storage.invocations(conn, run_id)
+        if not prior_invs:
+            print(f"Refusing to resume {run_id!r}: it predates provenance "
+                  f"recording, so there is no way to show this invocation codes "
+                  f"under the same inputs, prompt and parser. Start a new run.",
+                  file=sys.stderr)
+            sys.exit(1)
+        diff = provenance.mismatches(prior_invs[0]["provenance"], prov)
+        if diff:
+            print(f"Refusing to resume {run_id!r}: this invocation differs from "
+                  f"the run's first one in what it would send or how it would "
+                  f"parse:\n  " + "\n  ".join(diff), file=sys.stderr)
+            sys.exit(1)
         prior_models = [m for m in (prior["models"] or "").split(",") if m]
         merged = prior_models + [a.name for a in adapters
                                  if a.name not in prior_models]
@@ -170,10 +233,15 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     else:
         storage.record_run(
             conn, run_id, label=label,
-            is_full=(max_codes is None and max_docs is None),
+            is_full=is_full,
             n_codes=len(codes), n_documents=len(sample),
             definitions=definitions, models=[a.name for a in adapters],
         )
+
+    storage.record_invocation(
+        conn, invocation_id=invocation_id, run_id=run_id, started_at=started_at,
+        git_commit=commit, git_dirty=dirty, models=[a.name for a in adapters],
+        argv=sys.argv, provenance=prov)
 
     # Documents are sent in batches rather than as one blob: the output token
     # budget is shared with the model's reasoning tokens, so a frequent code
@@ -222,9 +290,29 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
         hits = []
         for i, code in enumerate(todo, 1):
             t0 = time.time()
+            code_attempt = uuid.uuid4().hex
+
+            def recorder(req, batch_label, attempt, outcome, reply, detail,
+                         _code_attempt=code_attempt):
+                """Store one request attempt verbatim (see raw_responses)."""
+                digest = provenance.prompt_sha256(SYSTEM_PROMPT, build_user_prompt(req))
+                with write_lock:
+                    rc = storage.init_db(config.DB_PATH)
+                    try:
+                        storage.insert_raw_response(
+                            rc, run_id=run_id, invocation_id=invocation_id,
+                            model=adapter.name, code_name=req.code_name,
+                            code_attempt=_code_attempt, batch_label=batch_label,
+                            document_titles=req.document_titles,
+                            prompt_sha256=digest, attempt=attempt,
+                            outcome=outcome, detail=detail, reply=reply)
+                    finally:
+                        rc.close()
+
             try:
                 code_hits = code_across_batches(
-                    adapter, code.name, code.definition, batches, note=_note)
+                    adapter, code.name, code.definition, batches, note=_note,
+                    recorder=recorder)
             except Exception as exc:  # noqa: BLE001
                 # One code's failure must not discard the whole run's work: an
                 # unexpected response shape once cost 44 completed codes,
@@ -242,13 +330,10 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
             with write_lock:
                 wconn = storage.init_db(config.DB_PATH)
                 try:
-                    storage.insert_count_matrix(
-                        wconn, run_id, adapter.name,
+                    storage.persist_code(
+                        wconn, run_id, adapter.name, code.name,
                         build_count_matrix(code_hits, [code.name], titles),
-                        [code.name], titles)
-                    if code_hits:
-                        storage.insert_coding_results(
-                            wconn, run_id, adapter.name, code_hits)
+                        titles, code_hits, code_attempt)
                 finally:
                     wconn.close()
             print(f"    {prefix} [{i}/{len(todo)}] {code.name}: "
@@ -374,21 +459,15 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
         print(f"  WARNING: {len(unmatched)} code(s) have no row in the ground-truth "
               f"export and are reported as UNSCORED (excluded from the average, not "
               f"counted as zero agreement): {unmatched}")
-    kappa_rows = []
-    # Score every model the run holds, not only this invocation's: insert_kappa
-    # replaces the run's rows, so scoring a subset would drop the rest.
-    scored = voters + [("majority_vote", majority)]
-    for model_name, matrix in scored:
-        # A code that errored for this model has no coding to compare against;
-        # scoring it would report a confident kappa for work never done. A model
-        # carried over from an earlier invocation has no `failed` entry here, so
-        # its completed codes are read from its own matrix instead.
-        model_codes = [c for c in code_names
-                       if c in matrix and c not in set(failed.get(model_name, []))]
-        for kr in per_code_kappa(model_codes, gt_counts, matrix, doc_pairs, code_to_gt):
-            kappa_rows.append((model_name, kr))
+    # Score every model the run holds, not only this invocation's. The rule
+    # lives in pipeline.scoring so verify_run.py recomputes it identically.
+    scored_majority, kappa_rows = scoring.score(
+        voters, code_names, titles, doc_pairs, gt_counts, code_to_gt, failed)
+    if scored_majority != majority:
+        raise RuntimeError("majority vote computed two different ways")
     storage.write_kappa_csv(out / f"kappa{suffix}.csv", kappa_rows)
     storage.insert_kappa(conn, run_id, kappa_rows)
+    storage.finish_invocation(conn, invocation_id, time.strftime("%Y-%m-%dT%H:%M:%S%z"))
 
     conn.close()
 
@@ -457,6 +536,10 @@ def main() -> None:
                         "--definitions=current. Defaults to config.DB_PATH. Opened "
                         "read-only (an in-memory copy), so an archived database is "
                         "safe to point at.")
+    p.add_argument("--allow-dirty", action="store_true",
+                   help="Permit a full run from uncommitted code. The commit and "
+                        "the dirty flag are recorded either way; a run made with "
+                        "this flag should not be published.")
     p.add_argument("--validate-only", action="store_true",
                    help="Cross-check the inputs and exit without calling any model.")
     p.add_argument("--skip-validate", action="store_true",
@@ -478,7 +561,7 @@ def main() -> None:
     run(max_codes=args.max_codes, max_docs=args.max_docs, label=args.label,
         definitions=args.definitions, definitions_db=args.definitions_db,
         model_concurrency=args.model_concurrency,
-        resume_run_id=args.resume_run_id)
+        resume_run_id=args.resume_run_id, allow_dirty=args.allow_dirty)
 
 
 if __name__ == "__main__":
