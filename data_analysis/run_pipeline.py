@@ -27,7 +27,7 @@ import config
 from models import available_adapters
 from pipeline.agreement import match_codes, mean_kappa
 from pipeline.codebook import load_codebook
-from pipeline.coding import code_across_batches, make_batches, returns_raw
+from pipeline.coding import code_across_batches, failure_kind, make_batches, returns_raw
 from pipeline.ground_truth import load_ground_truth_counts
 from pipeline.interviews import load_interviews, select_sample
 from pipeline.matrices import build_count_matrix, majority_vote
@@ -257,6 +257,11 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
     per_model_matrices: list[tuple[str, dict]] = []
     failed: dict[str, list[str]] = {}
     write_lock = threading.Lock()
+    # Set when a code fails because the token allowance is spent. Every later
+    # call would spend ~10 minutes in quota backoff and then fail too, so the
+    # invocation stops starting new codes and finishes cleanly instead; a
+    # resume after the allowance refills picks up exactly where it stopped.
+    quota_stop = threading.Event()
 
     def code_with(adapter):
         """Code every outstanding code through one model, persisting as it goes.
@@ -289,6 +294,10 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                   flush=True)
         hits = []
         for i, code in enumerate(todo, 1):
+            if quota_stop.is_set():
+                print(f"  {prefix} stopping before code {i}/{len(todo)}: token "
+                      f"quota exhausted.", flush=True)
+                break
             t0 = time.time()
             code_attempt = uuid.uuid4().hex
 
@@ -321,6 +330,8 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                 # which would look like a real (and very poor) result.
                 with write_lock:
                     failed.setdefault(adapter.name, []).append(code.name)
+                if failure_kind(exc) == "quota":
+                    quota_stop.set()
                 print(f"    ! {prefix} [{i}/{len(todo)}] {code.name}: FAILED after "
                       f"{time.time() - t0:.0f}s ({type(exc).__name__}: {exc}); "
                       f"excluded from this run.", flush=True)
@@ -489,8 +500,12 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
         print(f"  WARNING: {model_name} failed on {len(names)} code(s), which are "
               f"absent from its matrix and kappa: {', '.join(names)}")
     _print_kappa_summary(kappa_rows, doc_pairs)
+    if quota_stop.is_set():
+        print(f"\nSTOPPED EARLY: the token quota is exhausted. Resume later with "
+              f"--resume-run-id {run_id}.", flush=True)
     return {"run_id": run_id, "output_dir": str(out),
-            "doc_pairs": doc_pairs, "kappa_rows": kappa_rows}
+            "doc_pairs": doc_pairs, "kappa_rows": kappa_rows,
+            "quota_exhausted": quota_stop.is_set()}
 
 
 def _print_kappa_summary(kappa_rows, doc_pairs) -> None:
@@ -561,10 +576,12 @@ def main() -> None:
     if args.validate_only:
         return
 
-    run(max_codes=args.max_codes, max_docs=args.max_docs, label=args.label,
-        definitions=args.definitions, definitions_db=args.definitions_db,
-        model_concurrency=args.model_concurrency,
-        resume_run_id=args.resume_run_id, allow_dirty=args.allow_dirty)
+    result = run(max_codes=args.max_codes, max_docs=args.max_docs, label=args.label,
+                 definitions=args.definitions, definitions_db=args.definitions_db,
+                 model_concurrency=args.model_concurrency,
+                 resume_run_id=args.resume_run_id, allow_dirty=args.allow_dirty)
+    if result.get("quota_exhausted"):
+        sys.exit(3)     # distinct status: a queue runner stops, then resumes later
 
 
 if __name__ == "__main__":

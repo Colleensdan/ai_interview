@@ -556,3 +556,47 @@ def test_re_scoring_with_score_run_stores_exactly_what_the_pipeline_stored(pipel
                                      "majority_vote_matrix WHERE run_id=?", (run_id,)).fetchall())
     assert after == before and vote_after == vote_before
     assert verify_run.verify(conn, run_id).ok
+
+
+def test_a_spent_quota_stops_the_invocation_instead_of_failing_every_code(pipeline_env, monkeypatch):
+    """At the quota ceiling every later code would spend ~10 minutes in
+    backoff and then fail too. The invocation stops starting codes, scores
+    what it has, finishes cleanly, and the next resume picks up from there."""
+    import verify_run
+    monkeypatch.setattr(config, "TRANSIENT_RETRY_ATTEMPTS", 2)
+    codes = [c.name for c in pipeline_env.load_codes("codebook")[0][:4]]
+
+    class Quota(_Model):
+        def complete(self, request):
+            if request.code_name != codes[0]:
+                raise RuntimeError("PermissionDeniedError: 403 token quota is already exceeded")
+            return super().complete(request)
+
+    model = Quota("q")
+    monkeypatch.setattr(pipeline_env, "available_adapters", lambda: [model])
+    result = pipeline_env.run(label="quota", max_codes=4)
+    assert result["quota_exhausted"] is True
+    conn = storage.init_db(config.DB_PATH)
+    run_id = _latest_run(conn)
+    attempted = {r[0] for r in conn.execute(
+        "SELECT DISTINCT code_name FROM raw_responses WHERE run_id=?", (run_id,))}
+    assert attempted == {codes[0], codes[1]}, "codes 3 and 4 must not be attempted"
+    assert storage.codes_already_coded(conn, run_id, "q") == {codes[0]}
+    assert storage.invocations(conn, run_id)[-1]["finished_at"]
+    assert verify_run.verify(conn, run_id).ok
+
+    monkeypatch.setattr(pipeline_env, "available_adapters", lambda: [_Model("q")])
+    assert pipeline_env.run(label="quota", max_codes=4,
+                            resume_run_id=run_id)["quota_exhausted"] is False
+    assert storage.codes_already_coded(conn, run_id, "q") == set(codes)
+    assert verify_run.verify(conn, run_id).ok
+
+
+def test_main_exits_3_when_the_quota_stops_a_run(monkeypatch):
+    import sys
+    import run_pipeline
+    monkeypatch.setattr(run_pipeline, "run", lambda **_k: {"quota_exhausted": True})
+    monkeypatch.setattr(sys, "argv", ["run_pipeline.py", "--skip-validate"])
+    with pytest.raises(SystemExit) as info:
+        run_pipeline.main()
+    assert info.value.code == 3
