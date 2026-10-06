@@ -20,7 +20,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import config
-from models.base import CodingRequest, SCOPE_INTERVIEWEE, SCOPE_INTERVIEWER, TruncatedResponseError
+from models.base import (CodingRequest, MalformedResponseError, SCOPE_INTERVIEWEE,
+                         SCOPE_INTERVIEWER, TruncatedResponseError)
+from models.prompting import parse_occurrences
 from pipeline.interviews import Interview, merge_documents
 
 #: Substrings marking a failure of the infrastructure rather than of the model.
@@ -76,8 +78,8 @@ def failure_kind(exc: BaseException) -> str | None:
     later cannot possibly help, whereas a circuit breaker often clears that
     fast.
     """
-    if isinstance(exc, TruncatedResponseError):
-        return None           # has its own (correct) batch-splitting handler
+    if isinstance(exc, (TruncatedResponseError, MalformedResponseError)):
+        return None           # each has its own handler; neither is infrastructure
     text = f"{type(exc).__name__}: {exc}".lower()
     if any(m in text for m in _QUOTA_MARKERS):
         return "quota"
@@ -91,36 +93,94 @@ def is_transient(exc: BaseException) -> bool:
     return failure_kind(exc) is not None
 
 
-def call_with_retry(adapter, req: CodingRequest, note=print,
-                    attempts: int | None = None) -> list:
-    """``adapter.code_one`` with backoff on transient infrastructure faults.
+def returns_raw(adapter) -> bool:
+    """True if *adapter* exposes its raw replies (``ModelAdapter.complete``).
 
-    Both APIM gateways in use front the same Azure AI Foundry resource, so
-    running several models at once can trip a shared circuit breaker that has
-    nothing to do with any one model. Backoff is exponential with jitter — the
-    breaker stays open for a fixed window, so unjittered retries from parallel
-    workers would all return at the same instant and re-trip it.
+    Duck-typed adapters that only provide ``code_one`` (test doubles) do not.
+    """
+    has = getattr(adapter, "has_raw_replies", None)
+    return bool(callable(has) and has())
+
+
+def _attempt(adapter, req: CodingRequest):
+    """One request: ``(hits, reply)``. ``reply`` is None for an adapter that
+    does not expose raw replies (test doubles, stubs)."""
+    if returns_raw(adapter):
+        reply = adapter.complete(req)
+        try:
+            return parse_occurrences(reply.content, req), reply
+        except MalformedResponseError as exc:
+            exc.reply = reply
+            raise
+    return adapter.code_one(req), None
+
+
+def call_with_retry(adapter, req: CodingRequest, note=print,
+                    attempts: int | None = None, *, recorder=None,
+                    batch_label: str = "0") -> list:
+    """``adapter.code_one`` with retries, recording every attempt.
+
+    Two independent retry budgets:
+
+    * infrastructure faults (``failure_kind``) -- exponential backoff with
+      jitter. Both APIM gateways front the same Azure AI Foundry resource, so
+      parallel models can trip a shared circuit breaker; unjittered retries
+      from parallel workers would all return at once and re-trip it.
+    * malformed replies (``MalformedResponseError``) -- the request is re-issued
+      unchanged, up to ``config.MALFORMED_RETRY_ATTEMPTS`` times in total. Only
+      a reply that cannot be read as an answer is re-asked; a valid answer is
+      never re-asked because of what it says, which would bias the result.
+      When the budget is spent the error propagates and the code is recorded
+      as FAILED -- never as absent.
+
+    ``recorder(req, batch_label, attempt, outcome, reply, detail)`` is called
+    once per attempt with ``outcome`` in accepted | malformed | truncated |
+    error, so the stored replies account for every request made.
     """
     attempts = attempts or config.TRANSIENT_RETRY_ATTEMPTS
-    for attempt in range(attempts):
+    malformed_budget = config.MALFORMED_RETRY_ATTEMPTS
+    infra_failures = malformed = 0
+    n = 0
+
+    def record(outcome, reply=None, detail=""):
+        if recorder is not None:
+            recorder(req, batch_label, n, outcome, reply, detail)
+
+    while True:
+        n += 1
         try:
-            return adapter.code_one(req)
+            hits, reply = _attempt(adapter, req)
+        except MalformedResponseError as exc:
+            malformed += 1
+            record("malformed", getattr(exc, "reply", None), str(exc))
+            if malformed >= malformed_budget:
+                raise
+            note(f"    · {req.code_name}: malformed reply ({exc}); "
+                 f"re-asking {malformed}/{malformed_budget - 1}")
+            continue
+        except TruncatedResponseError as exc:
+            record("truncated", None, str(exc))
+            raise
         except Exception as exc:  # noqa: BLE001
             kind = failure_kind(exc)
-            if kind is None or attempt == attempts - 1:
+            record("error", None, f"{kind or 'permanent'}: {type(exc).__name__}: {exc}"[:2000])
+            infra_failures += 1
+            if kind is None or infra_failures >= attempts:
                 raise
             if kind == "quota":
                 # A spent allowance refills on the provider's clock, not ours.
-                delay = min(config.QUOTA_RETRY_BASE_SECONDS * (attempt + 1),
+                delay = min(config.QUOTA_RETRY_BASE_SECONDS * infra_failures,
                             config.QUOTA_RETRY_MAX_SECONDS)
             else:
-                delay = min(2 ** attempt * 5, 90)
+                delay = min(2 ** (infra_failures - 1) * 5, 90)
             delay *= (0.6 + 0.8 * random.random())
             note(f"    · {req.code_name}: {kind} "
-                 f"({type(exc).__name__}); retry {attempt + 1}/{attempts - 1} "
+                 f"({type(exc).__name__}); retry {infra_failures}/{attempts - 1} "
                  f"in {delay:.0f}s")
             time.sleep(delay)
-    raise AssertionError("unreachable")
+            continue
+        record("accepted", reply)
+        return hits
 
 
 def make_batches(sample: list[Interview], size: int | None = None) -> list[list[Interview]]:
@@ -132,11 +192,13 @@ def make_batches(sample: list[Interview], size: int | None = None) -> list[list[
 
 
 def code_batch(adapter, code_name: str, definition: str,
-               docs: list[Interview], note=print) -> list:
+               docs: list[Interview], note=print, *, recorder=None,
+               batch_label: str = "0") -> list:
     """Code one code over one batch, halving the batch on truncation.
 
-    A single document that still overflows is reported and skipped: it cannot be
-    split further, and recording it as "code absent" would be a lie.
+    A single document that still overflows cannot be split further. It raises,
+    so the code is recorded as FAILED: recording it as "code absent" would be a
+    lie, and so would silently skipping the document (it used to return []).
     """
     # Scope is a property of the code, so it is resolved here rather than
     # threaded through every caller (and every recursive split below).
@@ -149,33 +211,39 @@ def code_batch(adapter, code_name: str, definition: str,
                else SCOPE_INTERVIEWEE),
     )
     try:
-        return call_with_retry(adapter, req, note)
+        return call_with_retry(adapter, req, note, recorder=recorder,
+                               batch_label=batch_label)
     except TruncatedResponseError:
         if len(docs) == 1:
             note(f"    ! {code_name}: output limit hit on a single document "
-                 f"({docs[0].title}); its occurrences for this code are missing.")
-            return []
+                 f"({docs[0].title}); the code cannot be completed.")
+            raise
         mid = len(docs) // 2
         note(f"    · {code_name}: output limit hit on {len(docs)} documents, "
              f"splitting into {mid} + {len(docs) - mid}")
-        return (code_batch(adapter, code_name, definition, docs[:mid], note)
-                + code_batch(adapter, code_name, definition, docs[mid:], note))
+        return (code_batch(adapter, code_name, definition, docs[:mid], note,
+                           recorder=recorder, batch_label=f"{batch_label}.0")
+                + code_batch(adapter, code_name, definition, docs[mid:], note,
+                             recorder=recorder, batch_label=f"{batch_label}.1"))
 
 
 def code_across_batches(adapter, code_name: str, definition: str,
-                        batches: list[list[Interview]], note=print) -> list:
+                        batches: list[list[Interview]], note=print, *,
+                        recorder=None) -> list:
     """Code one code across every batch, batches in parallel.
 
     Results are concatenated in batch order, so a run is reproducible regardless
     of which request finishes first.
     """
     if len(batches) == 1:
-        return code_batch(adapter, code_name, definition, batches[0], note)
+        return code_batch(adapter, code_name, definition, batches[0], note,
+                          recorder=recorder, batch_label="0")
 
     results: list[list] = [[] for _ in batches]
     with ThreadPoolExecutor(max_workers=config.MAX_CONCURRENT_CALLS) as pool:
         futures = {
-            pool.submit(code_batch, adapter, code_name, definition, docs, note): idx
+            pool.submit(code_batch, adapter, code_name, definition, docs, note,
+                        recorder=recorder, batch_label=str(idx)): idx
             for idx, docs in enumerate(batches)
         }
         for fut in as_completed(futures):

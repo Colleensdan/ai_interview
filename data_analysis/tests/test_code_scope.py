@@ -60,7 +60,7 @@ def test_scope_is_resolved_from_the_code_name(monkeypatch):
     """code_batch derives scope itself, so no caller has to pass it."""
     seen = {}
 
-    def fake(adapter, req, note):
+    def fake(adapter, req, note, **_kw):
         seen["scope"] = req.scope
         return []
 

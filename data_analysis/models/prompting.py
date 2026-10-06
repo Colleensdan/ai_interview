@@ -14,7 +14,7 @@ import re
 
 import config
 
-from .base import SCOPE_INTERVIEWER, CodeHit, CodingRequest
+from .base import SCOPE_INTERVIEWER, CodeHit, CodingRequest, MalformedResponseError
 
 SYSTEM_PROMPT = (
     "You are an expert qualitative-coding assistant for social-science research. "
@@ -87,82 +87,116 @@ def build_user_prompt(request: CodingRequest) -> str:
     )
 
 
-def extract_json(text: str) -> dict:
-    """Robustly pull the JSON object out of a model response.
+#: Bumped whenever the acceptance rules below change. Recorded with every run
+#: and checked on resume, so one run is never parsed under two sets of rules.
+#:   1 -- lenient: any unusable reply was read as "no occurrences" (to 2026-10).
+#:   2 -- strict: an unusable reply raises MalformedResponseError.
+PARSER_VERSION = 2
 
-    Handles bare JSON, ```json fenced blocks, and leading/trailing prose.
+_DECODER = json.JSONDecoder(strict=False)   # tolerate raw control chars in strings
+_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+
+def _json_objects(text: str) -> list[object]:
+    """Every top-level JSON object in *text*, scanning left to right.
+
+    Each ``{`` is tried as the start of an object; on success the scan resumes
+    after it, so nested objects are not double-counted. Deterministic: the same
+    text always yields the same list in the same order.
     """
-    text = text.strip()
-    # Strip a ```json ... ``` (or ``` ... ```) fence if present.
-    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    found, i = [], text.find("{")
+    while i != -1:
+        try:
+            obj, end = _DECODER.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i = text.find("{", i + 1)
+            continue
+        found.append(obj)
+        i = text.find("{", end)
+    return found
+
+
+def extract_json(text: str) -> dict:
+    """The one JSON object in a model reply that answers the coding question.
+
+    Accepts a bare object, a ```json fence, and prose before or after the
+    object -- including prose that contains braces, which used to make the
+    whole reply unparseable. Rejects (``MalformedResponseError``):
+
+    * no object carrying an ``occurrences`` key -- e.g. a valid JSON answer to
+      a different question, which was being read as "absent everywhere";
+    * more than one such object -- ambiguous, and picking one would be a guess.
+    """
+    stripped = text.strip()
+    fence = _FENCE.match(stripped)
     if fence:
-        text = fence.group(1).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # Fall back to the outermost { ... } span.
-    start, end = text.find("{"), text.rfind("}")
-    span = text[start : end + 1] if (start != -1 and end > start) else text
-    try:
-        return json.loads(span)
-    except json.JSONDecodeError:
-        # Last resort: strip raw control characters that can appear unescaped
-        # inside quoted transcript text and re-parse.
-        cleaned = re.sub(r"[\x00-\x1f]", " ", span)
-        return json.loads(cleaned)
+        stripped = fence.group(1).strip()
+    if not stripped:
+        raise MalformedResponseError("empty reply", text)
+    candidates = [o for o in _json_objects(stripped)
+                  if isinstance(o, dict) and "occurrences" in o]
+    if not candidates:
+        raise MalformedResponseError(
+            "no JSON object with an 'occurrences' key", text)
+    if len(candidates) > 1:
+        raise MalformedResponseError(
+            f"{len(candidates)} JSON objects with an 'occurrences' key", text)
+    return candidates[0]
+
+
+def _resolve_title(title: str, valid: tuple[str, ...]) -> str | None:
+    """Map a returned title to exactly one document in the batch, or None.
+
+    An exact match wins. Otherwise a title that is a substring of exactly ONE
+    valid title (a model dropping ``.txt``) is snapped to it. Zero or several
+    matches resolve to nothing: attributing a quote to a guessed document would
+    corrupt the count matrix, and the old first-match rule depended on set
+    iteration order, which varies between processes.
+    """
+    if title in valid:
+        return title
+    if not title:
+        return None
+    matches = [t for t in valid if title in t]
+    return matches[0] if len(matches) == 1 else None
 
 
 def parse_occurrences(content: str, request: CodingRequest) -> list[CodeHit]:
-    """Turn a model's raw reply into CodeHit rows.
+    """Turn a model's raw reply into CodeHit rows, or raise.
 
-    Never raises on a malformed reply: a model that answers badly should cost us
-    one code's occurrences, not the whole run.
+    The accepted shape is exactly what the system prompt asks for: one object
+    whose ``occurrences`` is a list, each element an object with a non-empty
+    string ``quote`` and a ``document_title`` naming a document in this batch
+    (``reason`` optional). Anything else raises ``MalformedResponseError`` --
+    the whole reply, not just the bad element, because a reply that breaks the
+    contract in one place is not evidence about the rest. An empty list is the
+    only way to say "absent".
     """
-    try:
-        data = extract_json(content)
-    except (ValueError, TypeError) as exc:
-        print(f"    ! {request.code_name}: could not parse model response "
-              f"({exc}); treating as no occurrences.")
-        return []
-
-    valid_titles = set(request.document_titles)
+    data = extract_json(content)
+    occurrences = data["occurrences"]
+    if not isinstance(occurrences, list):
+        raise MalformedResponseError(
+            f"'occurrences' is a {type(occurrences).__name__}, not a list", content)
     hits: list[CodeHit] = []
-    occurrences = data.get("occurrences", []) if isinstance(data, dict) else []
-    if isinstance(occurrences, dict):      # a lone object instead of a list
-        occurrences = [occurrences]
-    elif not isinstance(occurrences, list):
-        occurrences = []
-    malformed = 0
-    for occ in occurrences:
-        # JSON mode guarantees valid JSON, not a particular shape: across a
-        # few hundred calls the model occasionally emits a bare string in
-        # place of an occurrence object. Skip those rather than crashing the
-        # run — and rather than guessing which document they belong to,
-        # since a wrongly attributed quote corrupts the count matrix.
+    for n, occ in enumerate(occurrences):
         if not isinstance(occ, dict):
-            malformed += 1
-            continue
-        title = str(occ.get("document_title", "")).strip()
-        quote = str(occ.get("quote", "")).strip()
-        reason = str(occ.get("reason", "")).strip()
-        if not quote:
-            continue
-        # Snap an unrecognised title to a valid one if it is a clear
-        # substring match; otherwise keep what the model said.
-        if title not in valid_titles:
-            match = next((t for t in valid_titles if title and title in t), None)
-            if match:
-                title = match
-        hits.append(
-            CodeHit(
-                document_title=title,
-                code_name=request.code_name,
-                quote=quote,
-                reason=reason,
-            )
-        )
-    if malformed:
-        print(f"    ! {request.code_name}: skipped {malformed} malformed "
-              f"occurrence(s) that were not objects.", flush=True)
+            raise MalformedResponseError(
+                f"occurrence {n} is a {type(occ).__name__}, not an object", content)
+        title, quote = occ.get("document_title"), occ.get("quote")
+        reason = occ.get("reason", "")
+        if not isinstance(quote, str) or not quote.strip():
+            raise MalformedResponseError(f"occurrence {n} has no quote", content)
+        if not isinstance(title, str):
+            raise MalformedResponseError(f"occurrence {n} has no document_title", content)
+        resolved = _resolve_title(title.strip(), request.document_titles)
+        if resolved is None:
+            raise MalformedResponseError(
+                f"occurrence {n} names {title!r}, which is not exactly one "
+                f"document in this batch", content)
+        hits.append(CodeHit(
+            document_title=resolved,
+            code_name=request.code_name,
+            quote=quote.strip(),
+            reason=reason.strip() if isinstance(reason, str) else str(reason),
+        ))
     return hits

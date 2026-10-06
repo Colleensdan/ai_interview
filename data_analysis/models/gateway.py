@@ -18,13 +18,18 @@ so results are comparable across models.
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 import config
-from .base import CodeHit, CodingRequest, ModelAdapter, TruncatedResponseError
+from .base import CodingRequest, ModelAdapter, RawReply, TruncatedResponseError
 from .catalog import ModelSpec, get_spec
 from . import usage
-from .prompting import SYSTEM_PROMPT, build_user_prompt, parse_occurrences
+from .prompting import SYSTEM_PROMPT, build_user_prompt
+
+#: The request parameters the current thread's last call actually sent. Batches
+#: run concurrently, so this cannot live on the (shared) adapter instance.
+_sent = threading.local()
 
 
 def _slug(model_id: str) -> str:
@@ -105,7 +110,9 @@ class GatewayOpenAIAdapter(ModelAdapter):
             if sent_response_format:
                 kwargs["response_format"] = {"type": "json_object"}
             try:
-                return client.chat.completions.create(**kwargs)
+                resp = client.chat.completions.create(**kwargs)
+                _sent.params = {k: v for k, v in kwargs.items() if k != "messages"}
+                return resp
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc).lower()
                 if "temperature" in msg and sent_temperature:
@@ -122,7 +129,8 @@ class GatewayOpenAIAdapter(ModelAdapter):
                     continue
                 raise
 
-    def code_one(self, request: CodingRequest) -> list[CodeHit]:
+    def complete(self, request: CodingRequest) -> RawReply:
+        _sent.params = {}
         resp = self._create(
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -137,7 +145,11 @@ class GatewayOpenAIAdapter(ModelAdapter):
                 f"{request.code_name}: hit the {config.MAX_OUTPUT_TOKENS}-token "
                 f"output limit across {len(request.document_titles)} document(s)"
             )
-        return parse_occurrences(content, request)
+        u = getattr(resp, "usage", None)
+        return RawReply(content=content, finish_reason=choice.finish_reason,
+                        params=dict(getattr(_sent, "params", {}) or {}),
+                        prompt_tokens=getattr(u, "prompt_tokens", None),
+                        completion_tokens=getattr(u, "completion_tokens", None))
 
 
 class GatewayAnthropicAdapter(ModelAdapter):
@@ -225,7 +237,7 @@ class GatewayAnthropicAdapter(ModelAdapter):
                     continue
                 raise
 
-    def code_one(self, request: CodingRequest) -> list[CodeHit]:
+    def complete(self, request: CodingRequest) -> RawReply:
         payload = {
             "model": self.model_id,
             "max_tokens": config.MAX_OUTPUT_TOKENS,
@@ -240,8 +252,8 @@ class GatewayAnthropicAdapter(ModelAdapter):
         data = self._send(payload)
 
         # There is no JSON mode on this API. The system prompt already demands a
-        # bare JSON object, and parse_occurrences copes with a ```json fence or
-        # surrounding prose, which is how a Claude model typically deviates.
+        # bare JSON object; parse_occurrences accepts a ```json fence or
+        # surrounding prose and rejects anything it cannot read unambiguously.
         usage.record_anthropic(self.name, data.get("usage"))
         parts = data.get("content") or []
         content = "".join(
@@ -254,4 +266,9 @@ class GatewayAnthropicAdapter(ModelAdapter):
                 f"{request.code_name}: hit the {config.MAX_OUTPUT_TOKENS}-token "
                 f"output limit across {len(request.document_titles)} document(s)"
             )
-        return parse_occurrences(content, request)
+        u = data.get("usage") or {}
+        return RawReply(content=content, finish_reason=data.get("stop_reason"),
+                        params={k: v for k, v in payload.items()
+                                if k not in ("messages", "system")},
+                        prompt_tokens=u.get("input_tokens"),
+                        completion_tokens=u.get("output_tokens"))

@@ -350,6 +350,13 @@ TRANSIENT_RETRY_ATTEMPTS = int(os.getenv("AICODE_TRANSIENT_RETRIES", "6"))
 # score_run.py + --resume-run-id make finishing later cheap.
 QUOTA_RETRY_BASE_SECONDS = float(os.getenv("AICODE_QUOTA_RETRY_BASE", "45"))
 QUOTA_RETRY_MAX_SECONDS = float(os.getenv("AICODE_QUOTA_RETRY_MAX", "180"))
+# Total attempts for one batch when the model's reply cannot be read as an
+# answer (no ``occurrences`` list, an unknown document title, ...). Such a reply
+# used to be scored as "absent in every document of the batch". It is now
+# re-asked, unchanged, up to this many times in all, and if no valid reply
+# arrives the code is recorded as FAILED. Every attempt's raw reply is stored
+# (raw_responses), so the re-asks are disclosed, not hidden.
+MALFORMED_RETRY_ATTEMPTS = int(os.getenv("AICODE_MALFORMED_RETRIES", "3"))
 
 # Cohen's kappa target (spec 4.8).
 KAPPA_TARGET = float(os.getenv("AICODE_KAPPA_TARGET", "0.80"))

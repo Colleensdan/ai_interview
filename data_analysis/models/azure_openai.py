@@ -13,13 +13,13 @@ this adapter with no arguments behaves exactly as it always has.
 from __future__ import annotations
 
 import config
-from .base import CodeHit, CodingRequest, ModelAdapter, TruncatedResponseError
+from .base import CodingRequest, ModelAdapter, RawReply, TruncatedResponseError
 from . import usage
+from .gateway import _sent
 from .prompting import (
     SYSTEM_PROMPT as _SYSTEM_PROMPT,
     build_user_prompt,
     extract_json as _extract_json,
-    parse_occurrences,
 )
 
 __all__ = ["AzureOpenAIAdapter"]
@@ -99,7 +99,9 @@ class AzureOpenAIAdapter(ModelAdapter):
             if sent_response_format:
                 kwargs["response_format"] = {"type": "json_object"}
             try:
-                return client.chat.completions.create(**kwargs)
+                resp = client.chat.completions.create(**kwargs)
+                _sent.params = {k: v for k, v in kwargs.items() if k != "messages"}
+                return resp
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc).lower()
                 if "temperature" in msg and sent_temperature:
@@ -112,7 +114,8 @@ class AzureOpenAIAdapter(ModelAdapter):
                     continue
                 raise
 
-    def code_one(self, request: CodingRequest) -> list[CodeHit]:
+    def complete(self, request: CodingRequest) -> RawReply:
+        _sent.params = {}
         resp = self._create(
             [
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -130,4 +133,8 @@ class AzureOpenAIAdapter(ModelAdapter):
                 f"{request.code_name}: hit the {config.MAX_OUTPUT_TOKENS}-token "
                 f"output limit across {len(request.document_titles)} document(s)"
             )
-        return parse_occurrences(content, request)
+        u = getattr(resp, "usage", None)
+        return RawReply(content=content, finish_reason=choice.finish_reason,
+                        params=dict(getattr(_sent, "params", {}) or {}),
+                        prompt_tokens=getattr(u, "prompt_tokens", None),
+                        completion_tokens=getattr(u, "completion_tokens", None))
