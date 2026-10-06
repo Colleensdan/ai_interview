@@ -23,6 +23,13 @@ Safety design
 * **Optimistic concurrency.** The upload carries ``If-Match`` on the ETag the
   download returned, so a concurrent writer (the running app) causes a clean
   failure instead of a lost update.
+* **Complete and verified runs only.** A run with recorded provenance is
+  published only if its last invocation finished, every model coded every
+  code, and ``verify_run`` re-derives all of its stored results from the
+  stored replies. An interrupted resume leaves a run marked full whose kappas
+  are stale; without this it would have been the default run to publish. A
+  run that predates provenance cannot be verified and is published with a
+  warning, as before.
 * **Idempotent.** Re-syncing the same run replaces that run's rows rather than
   duplicating them.
 
@@ -110,6 +117,32 @@ def pick_run(local: sqlite3.Connection, run_id: str | None) -> sqlite3.Row:
     return row
 
 
+def publish_problems(local: sqlite3.Connection, run) -> list[str]:
+    """Why *run* must not be published; empty if it may be."""
+    import verify_run
+
+    run_id = run["run_id"]
+    invs = storage.invocations(local, run_id)
+    if not invs:
+        print(f"  WARNING: {run_id!r} predates provenance recording; its results "
+              f"cannot be traced to raw replies or verified.")
+        return []
+    problems = []
+    if invs[-1]["finished_at"] is None:
+        problems.append("its last invocation did not finish (interrupted), so its "
+                        "scoring is stale")
+    codes = invs[0]["provenance"]["must_match"]["codes"]
+    for model in [m for m in (run["models"] or "").split(",") if m]:
+        have = {r[0] for r in local.execute(
+            "SELECT DISTINCT code_name FROM count_matrix WHERE run_id=? AND model=?",
+            (run_id, model))}
+        if missing := [c for c in codes if c not in have]:
+            problems.append(f"{model} has not coded {len(missing)} of {len(codes)} codes")
+    report = verify_run.verify(local, run_id)
+    problems += [f"verify_run: {f}" for f in report.failures]
+    return problems
+
+
 def copy_rows(local, remote, table: str, run_id: str) -> int:
     """Replace *table*'s rows for *run_id* in the remote DB with the local ones."""
     cols = [r[1] for r in local.execute(f"PRAGMA table_info({table})")
@@ -142,6 +175,10 @@ def main() -> int:
     print(f"  full={bool(run['is_full'])}  codes={run['n_codes']}  "
           f"documents={run['n_documents']}  definitions={run['definitions']}")
     print(f"  models: {run['models']}")
+    problems = publish_problems(local, run)
+    if problems:
+        raise SystemExit(f"Refusing to publish {run_id!r}:\n  - "
+                         + "\n  - ".join(problems))
 
     counts = {t: local.execute(
         f"SELECT COUNT(*) FROM {t} WHERE run_id=?", (run_id,)).fetchone()[0]

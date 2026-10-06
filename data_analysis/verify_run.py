@@ -21,8 +21,8 @@ link fails:
     python verify_run.py --run-id <id>
     python verify_run.py --run-id <id> --definitions-db <archived coding.sqlite>
 
-``--definitions-db`` is needed when the run used ``--definitions current`` with
-a definitions database other than ``config.DB_PATH``.
+``--definitions-db`` defaults to the definitions database the run recorded
+using; pass it only if that file has moved.
 """
 
 from __future__ import annotations
@@ -127,6 +127,10 @@ def verify(conn: sqlite3.Connection, run_id: str, definitions_db=None,
     # 2. inputs -----------------------------------------------------------------
     r.section("2. inputs on disk are the inputs the run used")
     mm = first["must_match"]
+    if definitions_db is None and mm["definitions"] == "current":
+        # Default to the definitions store the run recorded using; the
+        # fingerprint comparison below still proves it holds the same text.
+        definitions_db = first["info"].get("definitions_src")
     codes, src, max_v = run_pipeline.load_codes(mm["definitions"], definitions_db)
     by_name = {c.name: c for c in codes}
     missing = [n for n in mm["codes"] if n not in by_name]

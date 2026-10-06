@@ -381,12 +381,16 @@ def finish_invocation(conn, invocation_id: str, finished_at: str) -> None:
 
 
 def invocations(conn, run_id: str) -> list[dict]:
-    """Every recorded invocation of a run, oldest first."""
+    """Every recorded invocation of a run, in the order they were started."""
     import json
     rows = conn.execute(
         "SELECT invocation_id, started_at, finished_at, git_commit, git_dirty, "
         "models, argv, provenance FROM run_invocations WHERE run_id=? "
-        "ORDER BY started_at, invocation_id", (run_id,)).fetchall()
+        # Insertion order. started_at has one-second resolution, so ordering
+        # by it (with the random id as tie-break) could return two quick
+        # invocations in the wrong order -- and "first" is what a resume must
+        # match, "last" is whose scoring is stored.
+        "ORDER BY rowid", (run_id,)).fetchall()
     keys = ("invocation_id", "started_at", "finished_at", "git_commit",
             "git_dirty", "models", "argv", "provenance")
     out = []

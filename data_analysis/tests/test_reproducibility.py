@@ -442,3 +442,90 @@ def test_verify_detects_a_reply_recorded_against_a_different_prompt(pipeline_env
     conn.commit()
     report = verify_run.verify(conn, run_id)
     assert any("prompt differs from the one sent" in f for f in report.failures)
+
+
+# --- publishing ---------------------------------------------------------------
+
+def _run_row(conn, run_id):
+    conn.row_factory = sqlite3.Row
+    return conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
+
+
+def test_a_complete_verified_run_may_be_published(pipeline_env, monkeypatch):
+    import sync_to_live
+    monkeypatch.setattr(pipeline_env, "available_adapters", lambda: [_Model()])
+    pipeline_env.run(label="pub", max_codes=2)
+    conn = storage.init_db(config.DB_PATH)
+    assert sync_to_live.publish_problems(conn, _run_row(conn, _latest_run(conn))) == []
+
+
+def test_an_interrupted_resume_is_not_published(pipeline_env, monkeypatch):
+    """The state a quota ceiling leaves: a full run whose kappa is stale."""
+    import sync_to_live
+
+    class Dies(_Model):
+        def complete(self, request):
+            if request.code_name == self.die_on:
+                raise KeyboardInterrupt("quota ceiling, operator stops the run")
+            return super().complete(request)
+
+    monkeypatch.setattr(pipeline_env, "available_adapters", lambda: [_Model("first")])
+    pipeline_env.run(label="pub2", max_codes=2)
+    conn = storage.init_db(config.DB_PATH)
+    run_id = _latest_run(conn)
+    second = Dies("second")
+    second.die_on = pipeline_env.load_codes("codebook")[0][1].name
+    monkeypatch.setattr(pipeline_env, "available_adapters", lambda: [second])
+    with pytest.raises(KeyboardInterrupt):
+        pipeline_env.run(label="pub2", max_codes=2, resume_run_id=run_id)
+    problems = sync_to_live.publish_problems(conn, _run_row(conn, run_id))
+    assert any("did not finish" in p for p in problems)
+    assert any("second has not coded 1 of 2" in p for p in problems)
+    assert any(p.startswith("verify_run:") for p in problems)
+
+
+def test_a_run_with_a_failed_code_is_not_published(pipeline_env, monkeypatch):
+    import sync_to_live
+    first_code, _ = _first_code_and_title(pipeline_env)
+    monkeypatch.setattr(pipeline_env, "available_adapters",
+                        lambda: [_Model(always_malformed={first_code})])
+    pipeline_env.run(label="pub3", max_codes=2)
+    conn = storage.init_db(config.DB_PATH)
+    problems = sync_to_live.publish_problems(conn, _run_row(conn, _latest_run(conn)))
+    assert problems == ["raw-model has not coded 1 of 2 codes"]
+
+
+def test_invocations_come_back_in_the_order_they_were_started(mem_db):
+    """Same-second starts used to be ordered by their random ids."""
+    conn = storage.init_db(config.DB_PATH)
+    ids = ["ffff", "0000", "8888"]          # deliberately not sorted
+    for i in ids:
+        storage.record_invocation(conn, invocation_id=i, run_id="r",
+                                  started_at="2026-10-06T12:00:00", git_commit="c",
+                                  git_dirty=False, models=["m"], argv=[], provenance={})
+    assert [i["invocation_id"] for i in storage.invocations(conn, "r")] == ids
+
+
+def test_sync_refuses_an_unpublishable_run_before_touching_sharepoint(pipeline_env, monkeypatch):
+    import sys
+    import sync_to_live
+    first_code, _ = _first_code_and_title(pipeline_env)
+    monkeypatch.setattr(pipeline_env, "available_adapters",
+                        lambda: [_Model(always_malformed={first_code})])
+    pipeline_env.run(label="pub4", max_codes=2)
+    conn = storage.init_db(config.DB_PATH)
+    run_id = _latest_run(conn)
+    # Mark it full so the older partial-run check cannot be what refuses it.
+    conn.execute("UPDATE runs SET is_full=1 WHERE run_id=?", (run_id,))
+    conn.commit()
+    conn.row_factory = sqlite3.Row
+    monkeypatch.setattr(sync_to_live, "open_local", lambda _p: conn)
+    monkeypatch.setattr(sync_to_live.sp, "configured", lambda: True)
+
+    def no_network(*_a, **_k):
+        raise AssertionError("SharePoint must not be contacted")
+
+    monkeypatch.setattr(sync_to_live.sp, "download_with_etag", no_network)
+    monkeypatch.setattr(sys, "argv", ["sync_to_live.py", "--run-id", run_id, "--dry-run"])
+    with pytest.raises(SystemExit, match=r"(?s)Refusing to publish.*has not coded 1 of 2"):
+        sync_to_live.main()
