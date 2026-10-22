@@ -97,8 +97,8 @@ class DataStore:
         return ms[0] if ms else MAJORITY
 
     # --- kappa -------------------------------------------------------------
-    def latest_kappa(self, model: str) -> dict[str, float | None]:
-        """Most recent kappa per code for a model (reflects re-analyses).
+    def _latest_kappa_rows(self, model: str) -> list[sqlite3.Row]:
+        """The most recent kappa row per code for a model (reflects re-analyses).
 
         Excluded codes are omitted. An excluded code is never sent to a model,
         so any kappa still stored against it comes from a run that predates its
@@ -110,22 +110,38 @@ class DataStore:
         each caller at once rather than relying on each to remember.
         """
         excluded = tuple(config.EXCLUDED_CODES)
-        sql = ("SELECT code_name, kappa FROM kappa k WHERE model=? AND id=("
+        sql = ("SELECT code_name, kappa, run_id FROM kappa k WHERE model=? AND id=("
                "  SELECT MAX(id) FROM kappa WHERE model=? AND code_name=k.code_name)")
         params: tuple = (model, model)
         if excluded:
             sql += f" AND code_name NOT IN ({','.join('?' * len(excluded))})"
             params += excluded
         with self._conn() as c:
-            rows = c.execute(sql, params).fetchall()
-        return {r["code_name"]: r["kappa"] for r in rows}
+            return c.execute(sql, params).fetchall()
+
+    def latest_kappa(self, model: str) -> dict[str, float | None]:
+        """Most recent kappa per code for a model (see _latest_kappa_rows)."""
+        return {r["code_name"]: r["kappa"] for r in self._latest_kappa_rows(model)}
+
+    def latest_runs(self, model: str) -> dict[str, str]:
+        """The run each code's displayed kappa came from.
+
+        Everything shown for a code -- its quotes, its failures, its export
+        column -- must be read from this run. The kappa row is the only record
+        that a run coded a code at all: a run in which the model found the code
+        nowhere writes a kappa row but no coding_results rows, so picking the
+        latest run *with quotes* silently skips it and pairs an older run's
+        quotes with the newer run's kappa.
+        """
+        return {r["code_name"]: r["run_id"] for r in self._latest_kappa_rows(model)}
 
     def overview(self, model: str) -> dict:
         kappas = self.latest_kappa(model)
         target = config.KAPPA_TARGET
         unquoted = set(self.codes_without_quotes())
         excluded = set(config.EXCLUDED_CODES)
-        success, fail = [], []
+        procedural_codes = config.PROCEDURAL_CODES
+        success, fail, procedural = [], [], []
         for code in (c.name for c in self._codes):
             # Excluded codes are never sent to the model, so counting them as
             # failures would understate the pass rate against a denominator
@@ -140,19 +156,30 @@ class DataStore:
                 # highlight on the human side. Flagged so it doesn't read as an
                 # AI-only code.
                 entry["no_human_quotes"] = True
-            if k is not None and k > target:
+            if code in procedural_codes:
+                # Coded and scored, but listed apart from the substantive codes,
+                # as the analysis reports them (see config.PROCEDURAL_CODES).
+                entry["passes"] = k is not None and k > target
+                procedural.append(entry)
+            elif k is not None and k > target:
                 success.append(entry)
             else:
                 fail.append(entry)
         total = len(success) + len(fail)
         success.sort(key=lambda e: e["code"])
         fail.sort(key=lambda e: (e["kappa"] is None, e["kappa"] if e["kappa"] is not None else 0))
+        procedural.sort(key=lambda e: e["code"])
 
-        # Headline agreement figure: the unweighted mean across codes. Computed
-        # from the same per-code kappas the two columns are built from, so the
-        # number on the home page can always be reconciled against the list
-        # under it. See pipeline.agreement.mean_kappa for why unweighted.
+        # Headline agreement figure: the unweighted mean across the substantive
+        # codes. Computed from the same per-code kappas the two columns are
+        # built from, so the number on the home page can always be reconciled
+        # against the list under it. See pipeline.agreement.mean_kappa for why
+        # unweighted. The all-codes mean is shown beside it rather than chosen
+        # between: whether the procedural codes belong in the average is a
+        # question of definition, and showing both answers it openly.
         agg = mean_kappa(e["kappa"] for e in success + fail)
+        agg_all = mean_kappa(e["kappa"] for e in success + fail + procedural)
+        r3 = lambda x: None if x is None else round(x, 3)
 
         return {
             "model": model,
@@ -162,12 +189,15 @@ class DataStore:
             "n_fail": len(fail),
             "pct_success": round(100 * len(success) / total, 1) if total else 0.0,
             "pct_fail": round(100 * len(fail) / total, 1) if total else 0.0,
-            "mean_kappa": None if agg["mean"] is None else round(agg["mean"], 3),
-            "median_kappa": None if agg["median"] is None else round(agg["median"], 3),
+            "mean_kappa": r3(agg["mean"]),
+            "median_kappa": r3(agg["median"]),
             "n_kappa_scored": agg["n_scored"],
             "n_kappa_unscored": agg["n_unscored"],
+            "mean_kappa_all": r3(agg_all["mean"]),
+            "n_kappa_scored_all": agg_all["n_scored"],
             "success": success,
             "fail": fail,
+            "procedural": procedural,
             # Named so the exclusion is visible rather than looking like codes
             # that quietly went missing from the codebook.
             "excluded": sorted(c.name for c in self._codes if c.name in excluded),
@@ -184,25 +214,29 @@ class DataStore:
         return [d for d in docs if d in self._interviews]
 
     # --- AI coding ---------------------------------------------------------
-    def ai_hits(self, model: str, doc: str, codes: list[str] | None = None) -> list[dict]:
-        """Latest AI (code, quote, reason) rows for a doc.
+    def ai_hits(self, model: str, doc: str, codes: list[str] | None = None,
+                runs: dict[str, str] | None = None) -> list[dict]:
+        """AI (code, quote, reason) rows for a doc, from the run each code's
+        displayed kappa came from (see latest_runs).
 
-        For majority vote there are no per-quote rows, so fall back to the
-        first real model's quotes (the vote is about presence, not text).
+        For majority vote there are no per-quote rows, so show the default
+        model's quotes from the run the vote's kappa came from (the vote is
+        about presence, not text). *runs* lets a caller looping over documents
+        look the runs up once.
         """
         src_model = model if model != MAJORITY else self.default_model()
-        params = [src_model, doc]
-        clause = ""
-        if codes:
-            clause = f" AND code_name IN ({','.join('?' * len(codes))})"
-            params += codes
+        if runs is None:
+            runs = self.latest_runs(model)
+        wanted = codes if codes else list(runs)
+        pairs = [(c, runs[c]) for c in wanted if c in runs]
+        if not pairs:
+            return []
+        clause = " OR ".join("(code_name=? AND run_id=?)" for _ in pairs)
+        params: list = [src_model, doc] + [x for p in pairs for x in p]
         with self._conn() as c:
             rows = c.execute(
-                "SELECT code_name, quote, reason FROM coding_results r "
-                "WHERE model=? AND document_title=?" + clause +
-                " AND run_id=(SELECT run_id FROM coding_results "
-                "            WHERE model=r.model AND code_name=r.code_name "
-                "            ORDER BY id DESC LIMIT 1)",
+                "SELECT code_name, quote, reason FROM coding_results "
+                f"WHERE model=? AND document_title=? AND ({clause}) ORDER BY id",
                 params,
             ).fetchall()
         return [dict(r) for r in rows]
@@ -347,13 +381,14 @@ class DataStore:
         return segments
 
     # --- located coded spans ----------------------------------------------
-    def _ai_spans(self, model: str, doc: str, code: str) -> list[dict]:
+    def _ai_spans(self, model: str, doc: str, code: str,
+                  runs: dict[str, str] | None = None) -> list[dict]:
         """AI-coded spans for a code in a doc, with offsets (start/end may be
         None if the quote can't be located)."""
         text = self._interviews.get(doc, "")
         norm = self._norm.get(doc)
         spans = []
-        for h in self.ai_hits(model, doc, [code]):
+        for h in self.ai_hits(model, doc, [code], runs):
             sp = locate(text, h["quote"], norm=norm)
             spans.append({"quote": h["quote"], "reason": h["reason"],
                           "start": sp.start if sp else None,
@@ -393,11 +428,12 @@ class DataStore:
         whole interview. NOTE: this is display only — Cohen's kappa is unchanged
         (still binary present/absent per code per transcript in agreement.py)."""
         docs = self.sampled_docs()
+        runs = self.latest_runs(model)
         out = []
         for code in codes:
             fp, fn = [], []
             for doc in docs:
-                ai_spans = self._ai_spans(model, doc, code)
+                ai_spans = self._ai_spans(model, doc, code, runs)
                 human_spans = self._human_spans(doc, code)
                 for a in ai_spans:
                     if not self._overlaps_any(a, human_spans):

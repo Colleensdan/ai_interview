@@ -18,6 +18,7 @@ import config
 from app.data_access import DataStore
 from app.inputs import InputStore
 from pipeline import storage
+from models.base import CodeHit
 from pipeline.agreement import KappaResult
 
 MODEL = "azure_openai-test"
@@ -86,6 +87,9 @@ def test_excluded_codes_are_not_counted_as_failures(mem_db, monkeypatch):
     store = DataStore(InputStore(from_disk=True))
     all_codes = [c.name for c in store.codebook()]
     assert len(all_codes) > 2
+    # Procedural codes are listed apart from the pass/fail total; this test is
+    # about exclusion only.
+    monkeypatch.setattr(config, "PROCEDURAL_CODES", frozenset())
 
     monkeypatch.setattr(config, "EXCLUDED_CODES", [])
     assert DataStore(InputStore(from_disk=True)).overview(MODEL)["total"] == len(all_codes)
@@ -134,3 +138,57 @@ def test_withdrawn_codes_are_not_served(mem_db, monkeypatch):
     served = DataStore(InputStore(from_disk=True)).latest_kappa(MODEL)
     assert "frustration" in served, "a live code should still be served"
     assert "worry" not in served, "a withdrawn code leaked back into the app"
+
+
+def test_quotes_come_from_the_run_the_kappa_came_from(mem_db):
+    """A code's quotes and its kappa must describe the same run.
+
+    Reported on the live site for "pro-environmental social norms increased":
+    kappa .00 beside two quotes. The newest run found the code nowhere, so it
+    wrote a kappa row but no coding_results rows; the quote lookup took the
+    newest run *with quotes* and showed the previous run's two hits under the
+    newest run's kappa.
+    """
+    code = "frustration"
+    conn = storage.init_db(config.DB_PATH)
+    storage.insert_coding_results(conn, "run_a", MODEL, [
+        CodeHit("d1.txt", code, "an old quote", "old reason")], code_names=[code])
+    storage.insert_kappa(conn, "run_a", [(MODEL, KappaResult(code, 0.66, 10, 1, 2))])
+    storage.insert_coding_results(conn, "run_b", MODEL, [], code_names=[code])
+    storage.insert_kappa(conn, "run_b", [(MODEL, KappaResult(code, 0.0, 10, 1, 0))])
+    conn.close()
+
+    store = DataStore(InputStore(from_disk=True))
+    assert store.latest_kappa(MODEL)[code] == 0.0
+    assert store.latest_runs(MODEL)[code] == "run_b"
+    assert store.ai_hits(MODEL, "d1.txt", [code]) == []
+    assert store.ai_hits(MODEL, "d1.txt") == []
+
+    # And the other way round: once a newer run does find it, its quotes show.
+    conn = storage.init_db(config.DB_PATH)
+    storage.insert_coding_results(conn, "run_c", MODEL, [
+        CodeHit("d1.txt", code, "a new quote", "new reason")], code_names=[code])
+    storage.insert_kappa(conn, "run_c", [(MODEL, KappaResult(code, 1.0, 10, 1, 1))])
+    conn.close()
+    hits = store.ai_hits(MODEL, "d1.txt", [code])
+    assert [h["quote"] for h in hits] == ["a new quote"]
+
+
+def test_procedural_codes_are_listed_apart_and_both_means_served(mem_db, monkeypatch):
+    """Procedural codes get their own list, stay out of the pass counts and the
+    headline mean, and are folded into the second, all-codes mean."""
+    monkeypatch.setattr(config, "EXCLUDED_CODES", [])
+    monkeypatch.setattr(config, "PROCEDURAL_CODES", frozenset({"finished"}))
+    conn = storage.init_db(config.DB_PATH)
+    storage.insert_kappa(conn, "run_test", [
+        (MODEL, KappaResult("frustration", 0.5, 10, 5, 5)),
+        (MODEL, KappaResult("finished", 1.0, 10, 5, 5)),
+    ])
+    conn.close()
+    ov = DataStore(InputStore(from_disk=True)).overview(MODEL)
+    assert [e["code"] for e in ov["procedural"]] == ["finished"]
+    assert ov["procedural"][0]["passes"] is True
+    listed = {e["code"] for e in ov["success"] + ov["fail"]}
+    assert "finished" not in listed and "frustration" in listed
+    assert ov["mean_kappa"] == 0.5 and ov["n_kappa_scored"] == 1
+    assert ov["mean_kappa_all"] == 0.75 and ov["n_kappa_scored_all"] == 2

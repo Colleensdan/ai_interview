@@ -132,8 +132,18 @@ function renderStart(root) {
           + (o.n_kappa_unscored
               ? `  ·  ${o.n_kappa_unscored} unscored (no ground-truth row)` : "")));
 
+  // The same mean with the procedural codes folded in. Shown beside the
+  // headline rather than chosen between: whether they belong in the average is
+  // a matter of definition, and both answers are on the page.
+  const allTile = el("div", { class: "kpi" },
+    el("div", { class: "big" },
+      o.mean_kappa_all === null ? "—" : o.mean_kappa_all.toFixed(3)),
+    el("div", { class: "lbl" },
+      `mean κ incl. procedural  ·  ${o.n_kappa_scored_all} code${o.n_kappa_scored_all === 1 ? "" : "s"}`));
+
   wrap.append(el("div", { class: "kpi-row" },
     meanTile,
+    allTile,
     el("div", { class: "kpi success" },
       el("div", { class: "big" }, `${o.n_success}`),
       el("div", { class: "lbl" }, `codes at κ > ${o.target}  ·  ${o.pct_success}%`)),
@@ -148,14 +158,13 @@ function renderStart(root) {
   // Codes deliberately not sent to the model. Stated rather than omitted, so
   // the codebook total and the scored total don't look like a discrepancy.
   if ((o.excluded || []).length) {
-    // Two distinct reasons live in this list (see config.EXCLUDED_CODES): codes
-    // describing the chatbot rather than the participant, and codes the human
-    // coders withdrew from the ground truth. Naming only the first would
-    // mislabel the second, so the wording covers both.
+    // Two distinct reasons live in this list (see config.EXCLUDED_CODES): the
+    // "summary" parent category, and codes the human coders withdrew from the
+    // ground truth. Naming only one would mislabel the other.
     wrap.append(el("div", { class: "notice" },
-      `${o.excluded.length} code(s) excluded from coding and κ — they describe `
-      + `the chatbot's own behaviour rather than the participant's answers, or `
-      + `the human coders withdrew them from the ground truth: `
+      `${o.excluded.length} code(s) excluded from coding and κ — an ATLAS.ti `
+      + `parent category with no definition of its own, or codes the human `
+      + `coders withdrew from the ground truth: `
       + o.excluded.join(", ")));
   }
 
@@ -181,6 +190,14 @@ function renderStart(root) {
     mkCol("✓ Successful codes", o.success),
     mkCol("✗ Unsuccessful codes", o.fail, allUnsuccessful),
   ));
+
+  // Procedural codes describe the interview procedure (did the chatbot close
+  // the chat; how was its summary rated), so they are listed apart from the
+  // substantive codes and kept out of the headline mean and pass counts.
+  if ((o.procedural || []).length) {
+    wrap.append(el("div", { class: "columns procedural" },
+      mkCol("Procedural codes (reported separately)", o.procedural)));
+  }
 
   wrap.append(el("div", { class: "start-actions" },
     el("button", { class: "btn", onclick: () => { S.selected.clear(); render(); } }, "Clear"),

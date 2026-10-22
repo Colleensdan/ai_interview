@@ -32,6 +32,7 @@ import time
 
 import config
 import db
+from pipeline import export
 from . import sharepoint_io as sp
 
 log = logging.getLogger("app.state_sync")
@@ -182,11 +183,16 @@ def push_state() -> bool:
             log.error("Failed to push state DB (%s); will retry on next write.", e)
             return False
 
-        # CSV mirror is best-effort readability; failures never block the DB push.
+        # CSV mirror and Excel export are best-effort readability; failures
+        # never block the DB push.
         try:
             _export_csv_mirror()
         except Exception as e:  # noqa: BLE001
             log.warning("CSV mirror export/upload failed (%s); DB blob is still authoritative.", e)
+        try:
+            _upload_matrix_workbook()
+        except Exception as e:  # noqa: BLE001
+            log.warning("Excel export upload failed (%s); DB blob is still authoritative.", e)
         return wrote
 
 
@@ -218,6 +224,20 @@ def _handle_conflict(our_blob: bytes) -> None:
 
 
 # --- CSV mirror (human-readable) --------------------------------------------
+
+def _export_remote(name: str) -> str:
+    return f"{config.SHAREPOINT_STATE_DIR}/export/{name}"
+
+
+def _upload_matrix_workbook() -> None:
+    """Code x interview workbook for checking the AI coding by hand."""
+    conn = db.connect()
+    try:
+        data = export.workbook_bytes(conn)
+    finally:
+        conn.close()
+    sp.upload_bytes(_export_remote(export.WORKBOOK_NAME), data)
+
 
 def _rows_to_csv(header: list[str], rows) -> bytes:
     buf = io.StringIO()
@@ -287,12 +307,18 @@ def _upload_kappa_csv(conn) -> None:
 
 
 def _upload_coding_results_csv(conn) -> None:
+    # Each (model, code) from the run its kappa came from, as the app shows it
+    # (see DataStore.latest_runs). This used to take each model's newest run
+    # with any quotes, which drops every code re-analysed since and pairs a
+    # code the newest run found nowhere with an older run's quotes.
     rows = _safe_query(conn,
-        "SELECT model, document_title, code_name, quote, reason FROM coding_results cr "
-        "WHERE run_id=(SELECT run_id FROM coding_results WHERE model=cr.model "
-        "ORDER BY id DESC LIMIT 1) ORDER BY model, document_title, code_name")
+        "SELECT model, document_title, code_name, quote, reason, run_id "
+        "FROM coding_results ORDER BY model, document_title, code_name, id")
     if rows is None:
         return
+    runs = export.latest_kappa_runs(conn)
+    rows = [r for r in rows
+            if runs.get((r["model"], r["code_name"]), (None,))[0] == r["run_id"]]
     data = _rows_to_csv(
         ["Model", "Document title", "Code name", "Quote", "Reason"],
         ((r["model"], r["document_title"], r["code_name"], r["quote"], r["reason"]) for r in rows))

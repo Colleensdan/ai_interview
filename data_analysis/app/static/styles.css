@@ -93,6 +93,7 @@ main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: 
 .kpi.headline .big.unscored { font-size: 30px; color: var(--muted); }
 
 .columns { display: flex; gap: 24px; align-items: flex-start; }
+.columns.procedural { margin-top: 24px; }
 .col { flex: 1; background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
 .col h3 { margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--line); font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
 .col h3 .count { color: var(--muted); font-weight: 500; font-size: 13px; }
