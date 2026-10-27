@@ -23,7 +23,7 @@ import time
 
 import config
 from .base import CodingRequest, ModelAdapter, RawReply, TruncatedResponseError
-from .catalog import ModelSpec, get_spec
+from .catalog import GATEWAY_OPENAI, ModelSpec, get_spec
 from . import usage
 from .prompting import SYSTEM_PROMPT, build_user_prompt
 
@@ -43,7 +43,10 @@ class GatewayOpenAIAdapter(ModelAdapter):
     def __init__(self, model_id: str, spec: ModelSpec | None = None) -> None:
         self.model_id = model_id
         self.spec = spec or get_spec(model_id)
-        self.name = f"openai_v1-{_slug(model_id)}"
+        # Direct-OpenAI results get their own prefix so a run never passes off
+        # api.openai.com output as the gateway's (or vice versa).
+        prefix = "openai" if self.spec.gateway == GATEWAY_OPENAI else "openai_v1"
+        self.name = f"{prefix}-{_slug(model_id)}"
         self._client = None
 
     @property
@@ -54,7 +57,7 @@ class GatewayOpenAIAdapter(ModelAdapter):
 
     def is_available(self) -> bool:
         base, key = self._creds
-        return bool(key and base)
+        return bool(key and base and self.model_id)
 
     def _get_client(self):
         if self._client is None:
@@ -64,13 +67,15 @@ class GatewayOpenAIAdapter(ModelAdapter):
             # Both gateways accept the subscription key in an `api-key` header.
             # It is also passed as api_key so the client sends an Authorization
             # bearer: CJBS honours that form, n1ai ignores it in favour of the
-            # header, and sending both keeps one client shape for both.
+            # header, and sending both keeps one client shape for both. OpenAI
+            # itself wants only the bearer.
+            headers = {} if self.spec.gateway == GATEWAY_OPENAI else {"api-key": key or ""}
             self._client = OpenAI(
                 api_key=key,
                 base_url=base,
                 timeout=config.REQUEST_TIMEOUT,
                 max_retries=5,
-                default_headers={"api-key": key or ""},
+                default_headers=headers,
             )
         return self._client
 

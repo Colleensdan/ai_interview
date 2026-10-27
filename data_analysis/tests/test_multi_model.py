@@ -290,3 +290,51 @@ def test_a_non_temperature_error_is_not_swallowed_by_the_drop_retry(monkeypatch)
     adapter = models.adapter_for("claude-sonnet-4-6")
     with pytest.raises(RuntimeError, match="ModelNotAllowed"):
         adapter.code_one(CodingRequest("c", "d", "=== DOCUMENT: A ===\nt\n", ("A",)))
+
+
+# --- personal OpenAI key (USE_AZURE=false) ------------------------------------
+#
+# The same switch as code/interview.py. Off, the OpenAI models must go to
+# api.openai.com on OPENAI_API_KEY and be labelled as such; n1ai and Claude rows
+# must not move.
+
+def _personal_key(monkeypatch, deployment="gpt-4o"):
+    monkeypatch.setattr(config, "USE_AZURE", False)
+    monkeypatch.setattr(config, "AZURE_DEPLOYMENT", deployment)
+    monkeypatch.setitem(config.GATEWAYS, "openai",
+                        ("https://api.openai.com/v1", "", "sk-test"))
+    monkeypatch.setattr(config, "SELECTED_MODELS", [])
+
+
+def test_personal_key_default_run_goes_to_openai(monkeypatch):
+    _personal_key(monkeypatch)
+    adapters = models.available_adapters()
+    assert [a.name for a in adapters] == ["openai-gpt-4o"]
+    assert adapters[0]._creds == ("https://api.openai.com/v1", "sk-test")
+
+
+def test_personal_key_reroutes_azure_rows_and_unknown_ids(monkeypatch):
+    _personal_key(monkeypatch)
+    nano = models.adapter_for("gpt-4.1-nano")
+    assert isinstance(nano, GatewayOpenAIAdapter) and nano.name == "openai-gpt-4.1-nano"
+    # Catalog knowledge (gpt-5-mini rejects temperature) survives the reroute.
+    assert models.adapter_for("gpt-5-mini").spec.supports_temperature is False
+    assert models.adapter_for("gpt-4o-mini").name == "openai-gpt-4o-mini"
+
+
+def test_personal_key_leaves_n1ai_and_claude_alone(monkeypatch):
+    _personal_key(monkeypatch)
+    assert models.adapter_for("gpt-5.2").name == "openai_v1-gpt-5.2"
+    assert models.adapter_for("claude-sonnet-4-6").name == "anthropic-claude-sonnet-4-6"
+
+
+def test_personal_key_without_a_key_is_unavailable(monkeypatch):
+    _personal_key(monkeypatch)
+    monkeypatch.setitem(config.GATEWAYS, "openai", ("https://api.openai.com/v1", "", None))
+    assert models.available_adapters() == []
+
+
+def test_personal_key_sends_no_azure_header(monkeypatch):
+    _personal_key(monkeypatch)
+    client = models.default_adapter()._get_client()
+    assert "api-key" not in {k.lower() for k in client._custom_headers}

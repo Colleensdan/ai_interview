@@ -54,7 +54,7 @@ def display_name(adapter_name: str) -> str:
     """'openai_v1-gpt-5.2' -> 'gpt-5.2'; majority vote keeps a readable label."""
     if adapter_name == MAJORITY:
         return "majority vote"
-    for prefix in ("azure_openai-", "openai_v1-", "anthropic-"):
+    for prefix in ("azure_openai-", "openai_v1-", "openai-", "anthropic-"):
         if adapter_name.startswith(prefix):
             return adapter_name[len(prefix):]
     return adapter_name

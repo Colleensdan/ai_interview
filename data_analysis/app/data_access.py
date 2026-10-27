@@ -68,9 +68,11 @@ class DataStore:
 
     # --- models ------------------------------------------------------------
     def live_model(self) -> str | None:
-        """The model the live Azure deployment would code under (or None)."""
+        """The model the live deployment would code under (or None)."""
         if config.AZURE_DEPLOYMENT:
-            return f"azure_openai-{config.AZURE_DEPLOYMENT}"
+            from models import default_adapter
+
+            return default_adapter().name
         return None
 
     def models(self) -> list[str]:

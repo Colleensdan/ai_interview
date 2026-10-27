@@ -60,6 +60,14 @@ Secrets and the SharePoint config live in `data_analysis/.env` (already present)
 Azure uses `CJBS_API_KEY`, `CJBS_API_ENDPOINT`, `CJBS_API_VERSION`,
 `CJBS_DEPLOYMENT_NAME` — identical to `code/`.
 
+To code with a personal OpenAI key instead, set `USE_AZURE=false` and
+`OPENAI_API_KEY` (same switch as `code/`). `CJBS_DEPLOYMENT_NAME` then names the
+OpenAI model, and the Azure-deployment catalog rows (`gpt-5-mini`,
+`gpt-4.1-nano`) plus any uncatalogued non-Claude id in `AICODE_MODELS` go to
+api.openai.com. Results are labelled `openai-<model>` rather than
+`azure_openai-<model>`, so the two are never mixed in one model column. The n1ai
+models and Claude are unaffected. `OPENAI_BASE_URL` overrides the endpoint.
+
 Paths and behaviour are configurable; defaults point at the real study data:
 
 | env var | default | |

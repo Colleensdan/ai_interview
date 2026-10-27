@@ -15,12 +15,55 @@ The interview platform is built using the library `streamlit` and the APIs of Op
 - Download miniconda from https://docs.anaconda.com/miniconda/miniconda-install/ and install it (skip if `conda` is already installed)
 - Obtain an API key from https://platform.openai.com/ or https://www.anthropic.com/api. In case of the OpenAI API, choose a "project" key
 - Download this repository
-- In the repository folder on your computer, paste your API key into the file `/code/.streamlit/secrets.toml` (requires to make hidden folders visible)
+- In the `code` folder, copy `.env.example` to `.env` and fill in your API credentials — either an Azure OpenAI deployment or a personal OpenAI key (see [API keys: Azure or personal OpenAI](#api-keys-azure-or-personal-openai) below)
 - In the config.py, select a language model and adjust the interview outline
 - In Terminal (Mac) or Anaconda Prompt (Windows), navigate to the folder `code` with `cd` (if unclear, briefly look up basic Linux command line syntax for navigating to folders)
 - Once in the `code` folder, create the environment from the .yml file by writing `conda env create -f interviewsenv.yml` and confirming with enter (this installs Python and all libraries necessary to run the platform; only needs to be done once)
 - Activate the environment with `conda activate interviews`
 - Start the platform with `streamlit run interview.py`
+
+## API keys: Azure or personal OpenAI
+
+Both the interview platform (`code/`) and the analysis app (`data_analysis/`) can
+run against either an **Azure OpenAI** deployment (the default) or a **personal
+OpenAI API key**. One variable, `USE_AZURE`, switches between them, and it means
+the same thing in both apps.
+
+| | Azure OpenAI (`USE_AZURE=true`, default) | Personal OpenAI key (`USE_AZURE=false`) |
+|---|---|---|
+| Key | `CJBS_API_KEY` | `OPENAI_API_KEY` |
+| Endpoint | `CJBS_API_ENDPOINT`, `CJBS_API_VERSION` | not needed (`OPENAI_BASE_URL` optional) |
+| Model | `CJBS_DEPLOYMENT_NAME` = your Azure deployment name | `CJBS_DEPLOYMENT_NAME` = any OpenAI model ID, e.g. `gpt-4o` |
+
+### Set-up with a personal OpenAI key
+
+1. Create a key at https://platform.openai.com/api-keys (a "project" key is fine) and make sure the project has billing enabled.
+2. **Interview platform:** copy `code/.env.example` to `code/.env` and set:
+   ```
+   USE_AZURE=false
+   OPENAI_API_KEY=sk-...
+   CJBS_DEPLOYMENT_NAME=gpt-4o
+   ```
+   Then start the app as usual with `streamlit run interview.py`.
+3. **Analysis app:** add the same three lines to `data_analysis/.env`. To check the key works before a full run, use:
+   ```
+   cd data_analysis
+   python check_models.py gpt-4o
+   ```
+   A `PASS` line means the key, the model and the JSON response format all work.
+4. **On Render:** set `USE_AZURE=false` and `OPENAI_API_KEY` in the service's Environment tab. The `CJBS_API_*` variables can then be left empty.
+
+### Set-up with Azure OpenAI
+
+Leave `USE_AZURE` unset (or set it to `true`) and fill in `CJBS_API_KEY`,
+`CJBS_API_ENDPOINT`, `CJBS_API_VERSION` and `CJBS_DEPLOYMENT_NAME` in each app's
+`.env`. `CJBS_DEPLOYMENT_NAME` must match the deployment name in your Azure
+resource.
+
+### What changes in the analysis app
+
+- Results are labelled `openai-<model>` (personal key) or `azure_openai-<model>` (Azure), so the two never get mixed into one model's figures. After switching, the dashboard shows the new model only once you've re-run it. Until then, earlier Azure runs are still listed but are no longer the default.
+- With `USE_AZURE=false`, the models in `AICODE_MODELS` that would normally use the Azure deployment (`gpt-5-mini`, `gpt-4.1-nano`, or any OpenAI model not in the catalogue) go to api.openai.com. Models served by the n1ai gateway and Claude models are not affected.
 
 ## Variant URLs (nondescript tokens)
 
@@ -159,6 +202,10 @@ You also need the Azure OpenAI variables on Render for the same reason:
 | `CJBS_API_ENDPOINT` | Azure OpenAI endpoint URL |
 | `CJBS_API_VERSION` | API version (e.g. `2024-10-21`) |
 | `CJBS_DEPLOYMENT_NAME` | Deployment name (e.g. `gpt-4.1-nano`) |
+
+To use a personal OpenAI key instead, set `USE_AZURE=false` and
+`OPENAI_API_KEY` in place of the three `CJBS_API_*` variables — see
+[API keys: Azure or personal OpenAI](#api-keys-azure-or-personal-openai).
 
 4. Click **Save** — Render redeploys automatically.
 

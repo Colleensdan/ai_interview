@@ -31,6 +31,8 @@ GATEWAY_CJBS = "cjbs"
 #: The n1ai APIM subscription (N1AI_API_ENDPOINT / N1AI_API_KEY). Same two route
 #: shapes as CJBS — what differs is which models the subscription is entitled to.
 GATEWAY_N1AI = "n1ai"
+#: OpenAI directly (OPENAI_API_KEY), used for the OpenAI models when USE_AZURE=false.
+GATEWAY_OPENAI = "openai"
 
 
 @dataclass(frozen=True)

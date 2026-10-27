@@ -260,6 +260,17 @@ RANDOM_SEED = int(os.getenv("AICODE_SEED", "42"))
 # column, something is wrong with the inputs, not with the data.
 MAX_DOC_LOSS_FRACTION = float(os.getenv("AICODE_MAX_DOC_LOSS", "0.05"))
 
+# --- provider switch ----------------------------------------------------------
+# Same switch as code/interview.py: USE_AZURE=true (the default) codes through the
+# CJBS Azure deployment; USE_AZURE=false sends the OpenAI models straight to
+# api.openai.com on a personal OPENAI_API_KEY. CJBS_DEPLOYMENT_NAME names the
+# model either way.
+USE_AZURE = str(os.getenv("USE_AZURE", "true")).strip().lower() in {"1", "true", "yes", "on"}
+
+# --- plain OpenAI (used when USE_AZURE=false) ----------------------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+
 # --- Azure OpenAI (live model) ----------------------------------------------
 # Mirrors code/interview.py and code/bench_llm.py exactly.
 AZURE_API_KEY = os.getenv("CJBS_API_KEY")
@@ -302,6 +313,8 @@ def _n1ai_base(suffix: str) -> str:
 GATEWAYS: dict[str, tuple[str, str, str | None]] = {
     "cjbs": (GATEWAY_OPENAI_BASE, GATEWAY_ANTHROPIC_BASE, AZURE_API_KEY),
     "n1ai": (_n1ai_base("/openai/v1"), _n1ai_base("/anthropic"), N1AI_API_KEY),
+    # Not a gateway: OpenAI itself, on a personal key. No Anthropic route.
+    "openai": (OPENAI_BASE_URL, "", OPENAI_API_KEY),
 }
 
 

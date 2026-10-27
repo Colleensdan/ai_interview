@@ -63,6 +63,7 @@ Secrets (set as `sync:false` — **never committed**):
 | Var | Purpose |
 |-----|---------|
 | `CJBS_API_KEY`, `CJBS_API_ENDPOINT`, `CJBS_API_VERSION` | Azure OpenAI (deployment name is pinned in `render.yaml`, not here) |
+| `USE_AZURE=false` + `OPENAI_API_KEY` | optional: code on a personal OpenAI key instead of Azure. The live model becomes `openai-<deployment>`, so existing `azure_openai-…` runs stop being the default view until re-run |
 | `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` | SharePoint (Microsoft Graph) auth |
 | `SP_HOSTNAME`, `SP_SITE_PATH`, `SP_LIBRARY_NAME` | SharePoint site / library |
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | the shared login (currently `Malte` / `Piotr`) |
