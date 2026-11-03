@@ -34,7 +34,12 @@ const kfmt = (k) => (k == null ? "—" : Number(k).toFixed(2));
 async function api(path, opts) {
   const r = await fetch(path, opts);
   if (r.status === 401) { location.href = "/login?next=/"; throw new Error("Not authenticated"); }
-  if (!r.ok) { const t = await r.text(); throw new Error(t || r.statusText); }
+  if (!r.ok) {
+    const t = await r.text();
+    let msg = t || r.statusText;
+    try { const j = JSON.parse(t); if (typeof j.detail === "string") msg = j.detail; } catch (_) { /* not JSON */ }
+    throw new Error(msg);
+  }
   return r.json();
 }
 let toastTimer;
@@ -528,10 +533,26 @@ function defCard(d) {
     el("div", { style: "margin-top:8px" },
       el("button", {
         class: "btn", onclick: async (e) => {
+          const btn = e.currentTarget;
+          if (btn.disabled) return;
           const def = ta.value.trim();
           if (!def) { toast("Definition is empty."); return; }
-          await api("/api/definition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: d.code, definition: def }) });
-          toast(`Saved new definition for ${d.code}.`);
+          if (def === d.current.definition.trim()) { toast("Definition is unchanged."); return; }
+          // A save waits for the database to reach SharePoint on the live app.
+          // Disable the button meanwhile, so a click that seems to do nothing
+          // can't be repeated into duplicate versions, and report failures
+          // rather than dropping them.
+          btn.disabled = true; btn.textContent = "Saving…";
+          let saved;
+          try {
+            saved = await api("/api/definition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: d.code, definition: def }) });
+          } catch (err) {
+            btn.disabled = false; btn.textContent = "Save definition";
+            toast(`Could not save the definition for ${d.code}: ${err.message}`);
+            return;
+          }
+          toast(saved.warning ? `Saved new definition for ${d.code}. ${saved.warning}`
+                              : `Saved new definition for ${d.code}.`);
           render();
         },
       }, "Save definition")),

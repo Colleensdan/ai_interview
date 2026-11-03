@@ -218,7 +218,19 @@ def api_save_definition(body: DefinitionUpdate):
     # Flush the edit to SharePoint synchronously so it's durable before we return
     # (RAM-only: nothing on this instance survives a restart).
     if config.MEMORY_DB:
-        state_sync.push_state()
+        durable = state_sync.push_state()
+        # An ETag conflict moves this edit into state/conflicts/ and reloads the
+        # database from SharePoint, so the version just saved is no longer
+        # current. Say so, rather than report a save the page will not show.
+        cur = defs().current(body.code)
+        if not cur or (cur["version"], cur["definition"]) != (result["version"], result["definition"]):
+            raise HTTPException(409, (
+                "SharePoint changed under the app, so this edit was not kept. It "
+                "is preserved in the state/conflicts folder. Reload the page and "
+                "enter it again."))
+        if not durable:
+            result["warning"] = ("Saved in the app, but not yet backed up to "
+                                 "SharePoint; it will be retried on the next save.")
     return result
 
 

@@ -17,6 +17,8 @@ Data-safety design:
   our version to a unique ``state/conflicts/`` copy, log CRITICAL, and converge
   our memory to the remote. Both versions are preserved; nothing is silently
   lost.
+* **Exports off the request path** — the CSV mirror and Excel workbook are
+  rebuilt by a background worker after each push; only the blob is waited on.
 * **Corruption guard** — we never upload a blob that fails an integrity check,
   and never load one that does (see ``db.load_blob``).
 """
@@ -183,16 +185,12 @@ def push_state() -> bool:
             log.error("Failed to push state DB (%s); will retry on next write.", e)
             return False
 
-        # CSV mirror and Excel export are best-effort readability; failures
-        # never block the DB push.
-        try:
-            _export_csv_mirror()
-        except Exception as e:  # noqa: BLE001
-            log.warning("CSV mirror export/upload failed (%s); DB blob is still authoritative.", e)
-        try:
-            _upload_matrix_workbook()
-        except Exception as e:  # noqa: BLE001
-            log.warning("Excel export upload failed (%s); DB blob is still authoritative.", e)
+        # The CSV mirror and Excel export are best-effort readability copies.
+        # They take seconds (several uploads, plus building the workbook), and
+        # push_state runs inside the request that saved a definition, so they
+        # are handed to a background worker: the caller waits only for the DB
+        # blob, which is the copy that makes the write durable.
+        _schedule_exports()
         return wrote
 
 
@@ -223,19 +221,84 @@ def _handle_conflict(our_blob: bytes) -> None:
         log.critical("Failed to converge to remote after conflict (%s).", e)
 
 
+# --- background exports -----------------------------------------------------
+#
+# One worker at a time. Pushes that arrive while it runs set ``_export_pending``
+# and the worker goes round again, so a burst of saves costs at most one extra
+# export rather than one each.
+
+_export_cv = threading.Condition()
+_export_pending = False
+_export_running = False
+
+
+def _schedule_exports() -> None:
+    global _export_pending, _export_running
+    with _export_cv:
+        _export_pending = True
+        if _export_running:
+            return
+        _export_running = True
+    threading.Thread(target=_export_worker, name="state-export", daemon=True).start()
+
+
+def _export_worker() -> None:
+    global _export_pending, _export_running
+    try:
+        while True:
+            with _export_cv:
+                if not _export_pending:
+                    return
+                _export_pending = False
+            _run_exports()
+    finally:
+        with _export_cv:
+            _export_running = False
+            _export_cv.notify_all()
+
+
+def flush_exports(timeout: float | None = None) -> bool:
+    """Wait for scheduled exports to finish. True if they did within *timeout*."""
+    with _export_cv:
+        return _export_cv.wait_for(
+            lambda: not _export_running and not _export_pending, timeout)
+
+
+def _run_exports() -> None:
+    # Snapshot under the push lock (milliseconds), then build the exports from a
+    # private copy, so the slow part never holds up a save or reads the shared
+    # database while a conflict is replacing it.
+    try:
+        with _lock:
+            blob = db.dump_blob()
+        snap = sqlite3.connect(":memory:")
+        snap.deserialize(blob)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not snapshot the DB for export (%s); exports skipped.", e)
+        return
+    try:
+        try:
+            _export_csv_mirror(snap)
+        except Exception as e:  # noqa: BLE001
+            log.warning("CSV mirror export/upload failed (%s); DB blob is still authoritative.", e)
+        try:
+            _upload_matrix_workbook(snap)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Excel export upload failed (%s); DB blob is still authoritative.", e)
+    finally:
+        snap.close()
+
+
 # --- CSV mirror (human-readable) --------------------------------------------
 
 def _export_remote(name: str) -> str:
     return f"{config.SHAREPOINT_STATE_DIR}/export/{name}"
 
 
-def _upload_matrix_workbook() -> None:
+def _upload_matrix_workbook(conn: sqlite3.Connection) -> None:
     """Code x interview workbook for checking the AI coding by hand."""
-    conn = db.connect()
-    try:
-        data = export.workbook_bytes(conn)
-    finally:
-        conn.close()
+    conn.row_factory = None
+    data = export.workbook_bytes(conn)
     sp.upload_bytes(_export_remote(export.WORKBOOK_NAME), data)
 
 
@@ -248,14 +311,11 @@ def _rows_to_csv(header: list[str], rows) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
-def _export_csv_mirror() -> None:
-    conn = db.connect(row_factory=True)
-    try:
-        _upload_definitions_csv(conn)
-        _upload_kappa_csv(conn)
-        _upload_coding_results_csv(conn)
-    finally:
-        conn.close()
+def _export_csv_mirror(conn: sqlite3.Connection) -> None:
+    conn.row_factory = sqlite3.Row
+    _upload_definitions_csv(conn)
+    _upload_kappa_csv(conn)
+    _upload_coding_results_csv(conn)
 
 
 def _safe_query(conn, sql: str, params: tuple = ()):
@@ -329,5 +389,6 @@ def _upload_coding_results_csv(conn) -> None:
 
 def _reset_for_tests() -> None:
     global _etag
+    flush_exports(timeout=30)
     with _lock:
         _etag = None

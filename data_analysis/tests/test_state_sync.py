@@ -229,6 +229,7 @@ def test_first_boot_creates_remote_when_absent(fake_sp):
 def test_csv_mirror_uploaded_with_readable_content(fake_sp):
     _seed_db()
     state_sync.push_state()
+    assert state_sync.flush_exports(timeout=30)
     defs_path = state_sync._csv_remote("definitions.csv")
     assert defs_path in fake_sp.files
     content = fake_sp.files[defs_path][0].decode("utf-8")
@@ -259,7 +260,39 @@ def test_kappa_csv_omits_excluded_codes(fake_sp, monkeypatch):
     c.close()
 
     state_sync.push_state()
+    assert state_sync.flush_exports(timeout=30)
     content = fake_sp.files[state_sync._csv_remote("kappa.csv")][0].decode()
     codes = [r["Code"] for r in csv.DictReader(io.StringIO(content))]
     assert "A: trust" in codes, "a live code should still be exported"
     assert "worry" not in codes, "a withdrawn code leaked into the published CSV"
+
+
+def test_push_returns_before_the_exports_finish(fake_sp, monkeypatch):
+    """A definition save waits on push_state, so the slow readability exports
+    (CSV mirror, Excel workbook) must not hold it up. They used to run inline,
+    which left the Save button looking dead on the live app for many seconds."""
+    import threading
+    _seed_db()
+    gate = threading.Event()
+    monkeypatch.setattr(state_sync, "_export_csv_mirror", lambda conn: gate.wait(30))
+    assert state_sync.push_state() is True          # returns while export blocks
+    assert state_sync._db_remote() in fake_sp.files
+    assert not state_sync.flush_exports(timeout=0.1)
+    gate.set()
+    assert state_sync.flush_exports(timeout=30)
+
+
+def test_burst_of_pushes_coalesces_exports(fake_sp, monkeypatch):
+    import threading
+    _seed_db()
+    calls = []
+    gate = threading.Event()
+    def slow(conn):
+        calls.append(1)
+        gate.wait(30)
+    monkeypatch.setattr(state_sync, "_export_csv_mirror", slow)
+    for _ in range(5):
+        state_sync.push_state()
+    gate.set()
+    assert state_sync.flush_exports(timeout=30)
+    assert len(calls) <= 2, f"{len(calls)} exports for a burst of 5 pushes"

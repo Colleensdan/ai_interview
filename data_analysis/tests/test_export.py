@@ -70,6 +70,7 @@ def test_workbook_reads_each_column_from_the_kappa_run(mem_db, monkeypatch):
 def test_push_uploads_the_workbook(fake_sp, monkeypatch):  # noqa: F811
     _seed(monkeypatch).close()
     state_sync.push_state()
+    assert state_sync.flush_exports(timeout=30)
     path = state_sync._export_remote(export.WORKBOOK_NAME)
     assert path in fake_sp.files
     wb = openpyxl.load_workbook(io.BytesIO(fake_sp.files[path][0]))
@@ -84,5 +85,6 @@ def test_coding_results_csv_pairs_quotes_with_the_kappa_run(fake_sp, monkeypatch
     conn.commit()
     conn.close()
     state_sync.push_state()
+    assert state_sync.flush_exports(timeout=30)
     csv_bytes = fake_sp.files[state_sync._csv_remote("coding_results.csv")][0]
     assert b"old quote" not in csv_bytes

@@ -113,7 +113,8 @@ def test_edit_survives_full_restart(fake_env):
         assert r.json()["version"] >= 2
         # The edit was flushed to SharePoint.
         assert state_sync._db_remote() in fake_env.state
-        # And a readable CSV mirror exists.
+        # And a readable CSV mirror exists (written in the background).
+        assert state_sync.flush_exports(timeout=30)
         assert state_sync._csv_remote("definitions.csv") in fake_env.state
 
     # --- simulate a Render restart: wipe ALL in-memory state ------------
@@ -149,7 +150,30 @@ def test_definitions_csv_mirror_is_human_readable(fake_env):
         _login(c)
         code = _some_code(c)
         c.post("/api/definition", json={"code": code, "definition": "READABLE CHECK"})
+    assert state_sync.flush_exports(timeout=30)
     blob = fake_env.state[state_sync._csv_remote("definitions.csv")][0]
     rows = list(csv.reader(io.StringIO(blob.decode("utf-8"))))
     assert rows[0][:3] == ["code_name", "version", "definition"]
     assert any(r[0] == code and r[2] == "READABLE CHECK" for r in rows[1:])
+
+
+def test_save_reports_a_conflict_instead_of_success(fake_env):
+    """If SharePoint changed under the app, the edit goes to state/conflicts/ and
+    the app reloads the remote copy. The save must say so: reporting success for
+    an edit the page then does not show reads as a save button that does nothing."""
+    import app.main as main
+    with TestClient(main.app) as c:
+        _login(c)
+        code = _some_code(c)
+        assert c.post("/api/definition",
+                      json={"code": code, "definition": "FIRST"}).status_code == 200
+        # Another writer replaces the remote blob behind the app's back.
+        remote = state_sync._db_remote()
+        blob, _ = fake_env.state[remote]
+        fake_env.upload_bytes(remote, blob)
+        r = c.post("/api/definition", json={"code": code, "definition": "LOST"})
+        assert r.status_code == 409
+        assert "conflicts" in r.json()["detail"]
+        assert any("/conflicts/" in k for k in fake_env.state)
+        d = c.get("/api/definition", params={"code": code}).json()
+        assert d["current"]["definition"] == "FIRST"
