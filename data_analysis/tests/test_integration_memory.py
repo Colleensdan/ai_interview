@@ -192,9 +192,12 @@ def test_unchanged_save_writes_nothing(fake_env):
         _login(c)
         code = _some_code(c)
         cur = c.get("/api/definition", params={"code": code}).json()["current"]
+        state_sync.flush_exports(timeout=30)   # let boot's exports finish first
         before = dict(fake_env.state)
         r = c.post("/api/definition", json={"code": code, "definition": cur["definition"]})
         assert r.status_code == 200 and r.json()["unchanged"] is True
+        state_sync.flush_exports(timeout=30)
+        assert set(fake_env.state) - set(before) == set(), set(fake_env.state) - set(before)
         assert fake_env.state == before
         again = c.get("/api/definition", params={"code": code}).json()["current"]
         assert again["version"] == cur["version"]
