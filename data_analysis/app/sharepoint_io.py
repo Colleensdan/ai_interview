@@ -28,6 +28,10 @@ class SharePointError(RuntimeError):
     pass
 
 
+class AlreadyExists(SharePointError):
+    """A create-only upload found a file already at that path (nothing written)."""
+
+
 class PreconditionFailed(SharePointError):
     """Upload rejected because the remote item changed since we read it.
 
@@ -115,7 +119,8 @@ LARGE_UPLOAD_THRESHOLD = 4 * 1024 * 1024
 UPLOAD_CHUNK = 5 * 320 * 1024
 
 
-def _upload_session(remote_path: str, content: bytes) -> str | None:
+def _upload_session(remote_path: str, content: bytes,
+                    conflict: str = "replace") -> str | None:
     """Upload via a resumable session, for payloads too big for one PUT.
 
     Note the weaker concurrency guarantee: an upload session takes a conflict
@@ -129,9 +134,11 @@ def _upload_session(remote_path: str, content: bytes) -> str | None:
     r = requests.post(
         f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/createUploadSession",
         headers={**headers, "Content-Type": "application/json"},
-        json={"item": {"@microsoft.graph.conflictBehavior": "replace"}},
+        json={"item": {"@microsoft.graph.conflictBehavior": conflict}},
         timeout=60,
     )
+    if r.status_code == 409 and conflict == "fail":
+        raise AlreadyExists(f"'{remote_path}' already exists; nothing written")
     if r.status_code >= 400:
         raise SharePointError(
             f"Could not open an upload session for '{remote_path}' "
@@ -223,6 +230,32 @@ def upload_bytes(remote_path: str, content: bytes, if_match: str | None = None) 
             f"since ETag {if_match!r}")
     if r.status_code >= 400:
         raise SharePointError(f"Upload of '{remote_path}' failed ({r.status_code}): {r.text}")
+    try:
+        return r.json().get("eTag")
+    except ValueError:
+        return None
+
+
+def create_bytes(remote_path: str, content: bytes) -> str | None:
+    """Upload *content* only if nothing exists at *remote_path* yet.
+
+    Write-once: Graph's ``conflictBehavior=fail`` makes the service refuse
+    (409) rather than replace, so this can never overwrite or destroy an
+    existing file. Raises :class:`AlreadyExists` in that case. Returns the new
+    item's ETag.
+    """
+    if len(content) > LARGE_UPLOAD_THRESHOLD:
+        return _upload_session(remote_path, content, conflict="fail")
+    drive_id, headers = _headers()
+    path = remote_path.strip("/")
+    url = (f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/content"
+           "?@microsoft.graph.conflictBehavior=fail")
+    r = requests.put(url, headers={**headers, "Content-Type": "application/octet-stream"},
+                     data=content, timeout=120)
+    if r.status_code == 409:
+        raise AlreadyExists(f"'{remote_path}' already exists; nothing written")
+    if r.status_code >= 400:
+        raise SharePointError(f"Create of '{remote_path}' failed ({r.status_code}): {r.text}")
     try:
         return r.json().get("eTag")
     except ValueError:

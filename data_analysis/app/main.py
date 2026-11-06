@@ -21,7 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 from pipeline import storage
-from . import jobs, startup_sync, state_sync
+from . import definition_log, jobs, sharepoint_io, startup_sync, state_sync
 from .data_access import DataStore
 from .definitions import DefinitionStore
 from .inputs import InputStore
@@ -91,17 +91,25 @@ def _startup() -> None:
     # kappa / coding_results tables the read paths query.
     storage.init_db(config.DB_PATH).close()
     _data = DataStore(_inputs)
-    _defs = DefinitionStore(config.DB_PATH)
+    # Memory mode with SharePoint: each edit is made durable as one write-once
+    # file in the definition log before it is applied (app/definition_log.py).
+    journal = (definition_log.write_entry
+               if config.MEMORY_DB and sharepoint_io.configured() else None)
+    _defs = DefinitionStore(config.DB_PATH, journal=journal)
     baseline_model = _data.default_model()
-    _defs.seed(
+    seeded = _defs.seed(
         [(c.name, c.definition) for c in _data.codebook()],
         _data.latest_kappa(baseline_model),
         baseline_model,
     )
-    # Memory mode: persist the (possibly newly-seeded) baseline so SharePoint has
-    # a durable copy from the very first boot.
-    if config.MEMORY_DB:
+    # Memory mode: persist newly seeded codes so SharePoint has them. Only when
+    # something was seeded: an unconditional upload at boot changes the remote
+    # under an instance still serving during a deploy, whose next write then
+    # conflicts.
+    if config.MEMORY_DB and seeded:
         state_sync.push_state()
+    if config.MEMORY_DB:
+        state_sync.start_snapshot_timer()
     if not (config.AUTH_USERNAME and config.AUTH_PASSWORD):
         logging.getLogger("app").warning(
             "AUTH_USERNAME/AUTH_PASSWORD not set — login will reject all users.")
@@ -214,23 +222,19 @@ class DefinitionUpdate(BaseModel):
 def api_save_definition(body: DefinitionUpdate):
     if not body.definition.strip():
         raise HTTPException(400, "Definition cannot be empty.")
-    result = defs().save_new(body.code, body.definition.strip())
-    # Flush the edit to SharePoint synchronously so it's durable before we return
-    # (RAM-only: nothing on this instance survives a restart).
-    if config.MEMORY_DB:
-        durable = state_sync.push_state()
-        # An ETag conflict moves this edit into state/conflicts/ and reloads the
-        # database from SharePoint, so the version just saved is no longer
-        # current. Say so, rather than report a save the page will not show.
-        cur = defs().current(body.code)
-        if not cur or (cur["version"], cur["definition"]) != (result["version"], result["definition"]):
-            raise HTTPException(409, (
-                "SharePoint changed under the app, so this edit was not kept. It "
-                "is preserved in the state/conflicts folder. Reload the page and "
-                "enter it again."))
-        if not durable:
-            result["warning"] = ("Saved in the app, but not yet backed up to "
-                                 "SharePoint; it will be retried on the next save.")
+    try:
+        result = defs().save_new(body.code, body.definition.strip())
+    except definition_log.LogUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if result.get("unchanged"):
+        return result
+    if defs().journal is not None:
+        state_sync.schedule_definitions_export()
+    if config.MEMORY_DB and defs().journal is None:
+        # No definition log (SharePoint not configured): nothing durable to
+        # write to, so say so rather than imply the edit will survive.
+        result["warning"] = ("Saved in this session only: SharePoint is not "
+                             "configured, so the edit is lost on restart.")
     return result
 
 

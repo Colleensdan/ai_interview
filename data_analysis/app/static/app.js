@@ -485,7 +485,7 @@ async function renderFinish(root) {
   wrap.append(el("div", { class: "finish-bar" },
     el("button", { class: "btn", onclick: () => go("compare") }, "← Back to review"),
     el("span", { class: "scope-pick" }, "Re-analyse with:", scope),
-    el("button", { class: "btn btn-green", onclick: () => reanalyze(scope.value) }, "Re-Analyse"),
+    el("button", { class: "btn btn-green", onclick: (e) => reanalyze(scope.value, e.currentTarget) }, "Re-Analyse"),
   ));
   root.append(wrap);
 }
@@ -508,7 +508,10 @@ function defCard(d) {
       },
     }, "⤵"));
   }
-  return el("div", { class: "def-card", "data-code": d.code },
+  // The current text, for reanalyze() to tell an edited box from an untouched
+  // one. Read from here, not from the page: the card shows two definition
+  // boxes, and the first is the fixed initial one.
+  return el("div", { class: "def-card", "data-code": d.code, "data-current": d.current.definition },
     el("h3", {}, d.code),
     el("div", { class: "kappa-badge" }, `current κ ${kfmt(d.current.kappa)} · v${d.current.version}`),
     el("div", { class: "hint" }, "Initial human definition (fixed reference — never changes)"),
@@ -538,6 +541,7 @@ function defCard(d) {
             toast(`Could not save the definition for ${d.code}: ${err.message}`);
             return;
           }
+          if (saved.unchanged) { btn.disabled = false; btn.textContent = "Save definition"; toast("Definition is unchanged."); return; }
           toast(saved.warning ? `Saved new definition for ${d.code}. ${saved.warning}`
                               : `Saved new definition for ${d.code}.`);
           render();
@@ -547,21 +551,30 @@ function defCard(d) {
 }
 
 // ================================================================ 5.8 / 5.9
-async function reanalyze(scope) {
-  // Auto-save any edited definitions that differ before re-running.
-  for (const card of document.querySelectorAll(".def-card")) {
-    const code = card.getAttribute("data-code");
-    const ta = card.querySelector("textarea");
-    const cur = card.querySelector(".def-box").firstChild.textContent;
-    const val = ta.value.trim();
-    if (val && val !== cur.trim()) {
-      await api("/api/definition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, definition: val }) });
+async function reanalyze(scope, btn) {
+  if (btn && btn.disabled) return;
+  const label = btn ? btn.textContent : "";
+  const busy = (text) => { if (btn) { btn.disabled = true; btn.textContent = text; } };
+  const idle = () => { if (btn) { btn.disabled = false; btn.textContent = label; } };
+  try {
+    // Save any definition that was edited, so the run codes with it.
+    for (const card of document.querySelectorAll(".def-card")) {
+      const code = card.getAttribute("data-code");
+      const val = card.querySelector("textarea").value.trim();
+      if (val && val !== (card.getAttribute("data-current") || "").trim()) {
+        busy(`Saving ${code}…`);
+        await api("/api/definition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, definition: val }) });
+      }
     }
+    busy("Starting…");
+    const { job_id } = await api("/api/reanalyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes: [...S.selected], scope }) });
+    S.job = { id: job_id, status: "running", done: 0, total: 0, message: "Starting…" };
+    go("loading");
+    pollJob(job_id);
+  } catch (err) {
+    idle();
+    toast("Re-analysis did not start: " + err.message);
   }
-  const { job_id } = await api("/api/reanalyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes: [...S.selected], scope }) });
-  S.job = { id: job_id, status: "running", done: 0, total: 0, message: "Starting…" };
-  go("loading");
-  pollJob(job_id);
 }
 
 async function pollJob(id) {
