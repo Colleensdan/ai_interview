@@ -38,14 +38,14 @@ async function api(path, opts) {
     const t = await r.text();
     let msg = t || r.statusText;
     try { const j = JSON.parse(t); if (typeof j.detail === "string") msg = j.detail; } catch (_) { /* not JSON */ }
-    throw new Error(msg);
+    const err = new Error(msg); err.status = r.status; throw err;
   }
   return r.json();
 }
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 3200) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 3200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
 
 // ---------------------------------------------------------------- boot
@@ -156,8 +156,10 @@ function renderStart(root) {
       el("div", { class: "big" }, `${o.n_fail}`),
       el("div", { class: "lbl" }, `codes below κ ${o.target}  ·  ${o.pct_fail}%`)),
     el("div", { class: "kpi" },
-      el("div", { class: "big" }, `${o.total}`),
-      el("div", { class: "lbl" }, `codes scored  ·  model: ${esc(o.model)}`)),
+      el("div", { class: "big" }, `${o.n_scored_all}`),
+      el("div", { class: "lbl" }, `codes scored  ·  model: ${esc(o.model)}`),
+      el("div", { class: "sub" },
+        `${o.n_scored_substantive} substantive + ${o.n_scored_procedural} procedural`)),
   ));
 
   const mkCol = (title, items, footer) => {
@@ -571,7 +573,21 @@ async function pollJob(id) {
     if (j.status === "running") { renderLoading($("#screen")); setTimeout(() => pollJob(id), 1500); return; }
     if (j.status === "error") { toast("Re-analysis failed: " + j.error); go("finish"); return; }
     S.results = j.results; go("results");
-  } catch (e) { toast("Lost job: " + e.message); setTimeout(() => pollJob(id), 2500); }
+  } catch (e) {
+    if (e.status === 404) {
+      // The job record lives in the results database. If that database was
+      // replaced while the run was going (another writer, e.g. a results
+      // sync), the app reloads it and the record is gone: retrying would spin
+      // forever. Stop and say so; the run's output is kept in conflicts/.
+      S.job = null;
+      go("finish");
+      toast("Re-analysis was interrupted: the database was updated elsewhere while it ran. "
+        + "Its results were kept in the conflicts folder. Please run it again.", 12000);
+      return;
+    }
+    toast("Lost contact with the re-analysis, retrying: " + e.message);
+    setTimeout(() => pollJob(id), 2500);
+  }
 }
 
 function fmtEta(secs) {
