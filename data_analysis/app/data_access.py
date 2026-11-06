@@ -187,6 +187,12 @@ class DataStore:
             "model": model,
             "target": target,
             "total": total,
+            # Codes that actually have a kappa for this model, procedural
+            # included: what the "codes scored" tile counts. ``total`` is the
+            # denominator of the success/fail split (substantive codes only).
+            "n_scored_substantive": sum(e["kappa"] is not None for e in success + fail),
+            "n_scored_procedural": sum(e["kappa"] is not None for e in procedural),
+            "n_scored_all": sum(e["kappa"] is not None for e in success + fail + procedural),
             "n_success": len(success),
             "n_fail": len(fail),
             "pct_success": round(100 * len(success) / total, 1) if total else 0.0,
