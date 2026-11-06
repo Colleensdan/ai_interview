@@ -107,7 +107,7 @@ def test_kappa_target_drives_the_csv_header_and_the_overview(mem_db, tmp_path, m
     monkeypatch.setattr(config, "KAPPA_TARGET", 0.5)
     storage.write_kappa_csv(tmp_path / "k.csv", _rows())
     header = (tmp_path / "k.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert "meets_target_>0.5" in header
+    assert "meets_target_>=0.50_2dp" in header
 
     conn = storage.init_db(config.DB_PATH)
     storage.insert_kappa(conn, "run_test", _rows())
@@ -192,3 +192,13 @@ def test_procedural_codes_are_listed_apart_and_both_means_served(mem_db, monkeyp
     assert "finished" not in listed and "frustration" in listed
     assert ov["mean_kappa"] == 0.5 and ov["n_kappa_scored"] == 1
     assert ov["mean_kappa_all"] == 0.75 and ov["n_kappa_scored_all"] == 2
+
+
+def test_target_counts_a_kappa_that_rounds_to_it():
+    """Decided 2026-11-06: success is kappa >= 0.80 at 2 dp, i.e. >= 0.795."""
+    assert config.meets_target(0.7957781050564557)      # trust reduced, shown as 0.80
+    assert config.meets_target(0.795)
+    assert config.meets_target(0.7949999999999999)      # 0.795 with float error
+    assert config.meets_target(0.80) and config.meets_target(0.7999999999999997)
+    assert not config.meets_target(0.7945)
+    assert not config.meets_target(None) and not config.meets_target(float("nan"))

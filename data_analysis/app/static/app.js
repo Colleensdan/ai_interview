@@ -126,7 +126,7 @@ function renderStart(root) {
       ? el("div", { class: "big unscored" }, "—")
       : el("div", {
           class: "big",
-          style: `color: ${o.mean_kappa > o.target ? "var(--green)" : "var(--red)"}`,
+          style: `color: ${o.mean_meets_target ? "var(--green)" : "var(--red)"}`,
         }, o.mean_kappa.toFixed(3)),
     el("div", { class: "lbl" }, "mean κ across codes"),
     el("div", { class: "sub" },
@@ -151,10 +151,10 @@ function renderStart(root) {
     allTile,
     el("div", { class: "kpi success" },
       el("div", { class: "big" }, `${o.n_success}`),
-      el("div", { class: "lbl" }, `codes at κ > ${o.target}  ·  ${o.pct_success}%`)),
+      el("div", { class: "lbl" }, `codes at κ ≥ ${o.target.toFixed(2)}  ·  ${o.pct_success}%`)),
     el("div", { class: "kpi fail" },
       el("div", { class: "big" }, `${o.n_fail}`),
-      el("div", { class: "lbl" }, `codes below κ ${o.target}  ·  ${o.pct_fail}%`)),
+      el("div", { class: "lbl" }, `codes below κ ${o.target.toFixed(2)}  ·  ${o.pct_fail}%`)),
     el("div", { class: "kpi" },
       el("div", { class: "big" }, `${o.n_scored_all}`),
       el("div", { class: "lbl" }, `codes scored  ·  model: ${esc(o.model)}`),

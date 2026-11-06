@@ -440,13 +440,13 @@ def _upload_kappa_csv(conn) -> None:
     out = []
     for r in rows:
         k = r["kappa"]
-        meets = (k is not None) and k > config.KAPPA_TARGET
+        meets = config.meets_target(k)
         out.append((r["model"], r["code_name"], "" if k is None else round(k, 4),
                     r["n_documents"], r["n_human_present"], r["n_llm_present"], meets))
     data = _rows_to_csv(
         ["Model", "Code", "Cohen's kappa", "n_documents",
          "n_human_present", "n_llm_present",
-         f"meets_target_>{config.KAPPA_TARGET:g}"], out)
+         f"meets_target_>={config.KAPPA_TARGET:.2f}_2dp"], out)
     sp.upload_bytes(_csv_remote("kappa.csv"), data)
 
 

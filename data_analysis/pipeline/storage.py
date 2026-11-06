@@ -282,10 +282,10 @@ def write_kappa_csv(path: str | Path, rows: list[tuple[str, KappaResult]]) -> No
         target = config.KAPPA_TARGET
         w.writerow(
             ["Model", "Code", "Cohen's kappa", "n_documents",
-             "n_human_present", "n_llm_present", f"meets_target_>{target:g}"]
+             "n_human_present", "n_llm_present", f"meets_target_>={target:.2f}_2dp"]
         )
         for model, r in rows:
-            meets = (not _isnan(r.kappa)) and r.kappa > target
+            meets = config.meets_target(r.kappa)
             kappa_out = "" if _isnan(r.kappa) else round(r.kappa, 4)
             w.writerow([model, r.code_name, kappa_out, r.n_documents,
                         r.n_human_present, r.n_llm_present, meets])

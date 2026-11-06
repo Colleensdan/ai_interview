@@ -161,9 +161,9 @@ class DataStore:
             if code in procedural_codes:
                 # Coded and scored, but listed apart from the substantive codes,
                 # as the analysis reports them (see config.PROCEDURAL_CODES).
-                entry["passes"] = k is not None and k > target
+                entry["passes"] = config.meets_target(k)
                 procedural.append(entry)
-            elif k is not None and k > target:
+            elif config.meets_target(k):
                 success.append(entry)
             else:
                 fail.append(entry)
@@ -198,6 +198,7 @@ class DataStore:
             "pct_success": round(100 * len(success) / total, 1) if total else 0.0,
             "pct_fail": round(100 * len(fail) / total, 1) if total else 0.0,
             "mean_kappa": r3(agg["mean"]),
+            "mean_meets_target": config.meets_target(agg["mean"]),
             "median_kappa": r3(agg["median"]),
             "n_kappa_scored": agg["n_scored"],
             "n_kappa_unscored": agg["n_unscored"],

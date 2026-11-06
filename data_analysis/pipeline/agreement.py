@@ -1,7 +1,7 @@
 """Code-specific Cohen's kappa between human ground truth and LLM coding.
 
 Per spec 4.8: binary present/absent per code per transcript, computed per code,
-target > 0.80. Implemented directly (numpy not required) so the only edge cases
+target of 0.80 (met at >= 0.80 to 2 dp; see config.meets_target). Implemented directly (numpy not required) so the only edge cases
 we must define are the degenerate ones.
 """
 
