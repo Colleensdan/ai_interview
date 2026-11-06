@@ -600,3 +600,28 @@ def test_main_exits_3_when_the_quota_stops_a_run(monkeypatch):
     with pytest.raises(SystemExit) as info:
         run_pipeline.main()
     assert info.value.code == 3
+
+
+def test_a_single_model_run_does_not_publish_its_vote(mem_db):
+    """A vote of one is that model's kappas under the ensemble's label."""
+    import sqlite3
+    import sync_to_live
+
+    local = storage.init_db(config.DB_PATH)
+    remote = sqlite3.connect(":memory:")
+    remote.executescript(storage._SCHEMA)
+    local.executemany(
+        "INSERT INTO kappa (run_id, model, code_name, kappa) VALUES (?,?,?,?)",
+        [("r", "openai-gpt-5-mini", "finished", 0.96),
+         ("r", sync_to_live.MAJORITY, "finished", 0.96)])
+    local.execute("INSERT INTO majority_vote_matrix (run_id, code_name, document, count) "
+                  "VALUES ('r', 'finished', 'a.txt', 1)")
+
+    one = {"models": "openai-gpt-5-mini"}
+    two = {"models": "openai-gpt-5-mini,anthropic-claude-fable-5"}
+    assert not sync_to_live.publishes_vote(one) and sync_to_live.publishes_vote(two)
+
+    assert sync_to_live.copy_rows(local, remote, "kappa", "r", with_vote=False) == 1
+    assert remote.execute("SELECT model FROM kappa").fetchall() == [("openai-gpt-5-mini",)]
+    assert sync_to_live.copy_rows(local, remote, "majority_vote_matrix", "r", with_vote=False) == 0
+    assert sync_to_live.copy_rows(local, remote, "kappa", "r", with_vote=True) == 2

@@ -32,6 +32,10 @@ Safety design
   warning, as before.
 * **Idempotent.** Re-syncing the same run replaces that run's rows rather than
   duplicating them.
+* **No vote of one.** A single-model run's "majority vote" is that model's
+  results under another name. On the live site the vote is a cross-model
+  figure, so publishing it would file one model's kappas under the ensemble's
+  label; those rows stay local.
 
     python sync_to_live.py --dry-run              # newest full run, no writes
     python sync_to_live.py
@@ -57,6 +61,9 @@ BACKUP_ROOT = Path("/home/colleen/ai_interview_backups")
 
 #: Tables that carry a run_id and are therefore synced per run.
 RUN_TABLES = ("coding_results", "count_matrix", "majority_vote_matrix", "kappa")
+
+#: The majority-vote model label (pipeline.agreement.MAJORITY).
+MAJORITY = "majority_vote"
 
 
 def _remote_db() -> str:
@@ -143,13 +150,31 @@ def publish_problems(local: sqlite3.Connection, run) -> list[str]:
     return problems
 
 
-def copy_rows(local, remote, table: str, run_id: str) -> int:
+def publishes_vote(run) -> bool:
+    """Whether *run*'s majority-vote rows are published (see "No vote of one")."""
+    return len([m for m in (run["models"] or "").split(",") if m]) > 1
+
+
+def _run_filter(table: str, with_vote: bool) -> str:
+    """WHERE clause selecting the rows of one run that get published."""
+    if with_vote:
+        return "run_id=?"
+    if table == "majority_vote_matrix":
+        return "0"
+    if table == "kappa":
+        return f"run_id=? AND model != '{MAJORITY}'"
+    return "run_id=?"
+
+
+def copy_rows(local, remote, table: str, run_id: str, with_vote: bool = True) -> int:
     """Replace *table*'s rows for *run_id* in the remote DB with the local ones."""
     cols = [r[1] for r in local.execute(f"PRAGMA table_info({table})")
             if r[1] != "id"]           # let the remote assign its own ids
     remote.execute(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
+    where = _run_filter(table, with_vote)
+    params = () if where == "0" else (run_id,)
     rows = local.execute(
-        f"SELECT {','.join(cols)} FROM {table} WHERE run_id=?", (run_id,)).fetchall()
+        f"SELECT {','.join(cols)} FROM {table} WHERE {where}", params).fetchall()
     remote.executemany(
         f"INSERT INTO {table} ({','.join(cols)}) "
         f"VALUES ({','.join('?' * len(cols))})",
@@ -180,9 +205,15 @@ def main() -> int:
         raise SystemExit(f"Refusing to publish {run_id!r}:\n  - "
                          + "\n  - ".join(problems))
 
-    counts = {t: local.execute(
-        f"SELECT COUNT(*) FROM {t} WHERE run_id=?", (run_id,)).fetchone()[0]
-        for t in RUN_TABLES}
+    with_vote = publishes_vote(run)
+    if not with_vote:
+        print("  single-model run: its majority-vote rows stay local")
+    counts = {}
+    for t in RUN_TABLES:
+        where = _run_filter(t, with_vote)
+        counts[t] = local.execute(
+            f"SELECT COUNT(*) FROM {t} WHERE {where}",
+            () if where == "0" else (run_id,)).fetchone()[0]
     gt_rows = local.execute("SELECT COUNT(*) FROM ground_truth_matrix").fetchone()[0]
     for t, n in counts.items():
         print(f"    {t:24s} {n:>8,} rows")
@@ -216,7 +247,7 @@ def main() -> int:
     # --- merge ---------------------------------------------------------------
     # The live DB predates the runs table; create anything missing before merging.
     remote.executescript(storage._SCHEMA)
-    moved = {t: copy_rows(local, remote, t, run_id) for t in RUN_TABLES}
+    moved = {t: copy_rows(local, remote, t, run_id, with_vote) for t in RUN_TABLES}
     remote.execute("DELETE FROM ground_truth_matrix WHERE source='human_ground_truth'")
     remote.executemany(
         "INSERT INTO ground_truth_matrix (code_name, document, count) VALUES (?,?,?)",
