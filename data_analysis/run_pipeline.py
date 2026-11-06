@@ -515,12 +515,12 @@ def _print_kappa_summary(kappa_rows, doc_pairs) -> None:
         by_model.setdefault(model, []).append(kr)
     for model, krs in by_model.items():
         scored = [k.kappa for k in krs if not (isinstance(k.kappa, float) and k.kappa != k.kappa)]
-        meets = sum(1 for k in scored if k > config.KAPPA_TARGET)
+        meets = sum(1 for k in scored if config.meets_target(k))
         agg = mean_kappa(krs)
         mean_txt = "n/a" if agg["mean"] is None else f"{agg['mean']:.4f}"
         median_txt = "n/a" if agg["median"] is None else f"{agg['median']:.4f}"
         print(f"    {model}: {len(scored)} codes scored, "
-              f"{meets} above kappa>{config.KAPPA_TARGET}")
+              f"{meets} at kappa>={config.KAPPA_TARGET:.2f} (2 dp)")
         print(f"      mean kappa (unweighted across codes) = {mean_txt}  "
               f"[median {median_txt}, n={agg['n_scored']}, "
               f"unscored {agg['n_unscored']}]")

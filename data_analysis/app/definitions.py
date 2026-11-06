@@ -8,6 +8,7 @@ achieved). Stored in the same SQLite db as the Task 1 results.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 _SCHEMA = """
@@ -25,8 +26,14 @@ CREATE TABLE IF NOT EXISTS code_definitions (
 
 
 class DefinitionStore:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, journal=None):
+        """``journal``, if given, makes each new version durable before it is
+        added here: ``journal(code, version, definition, created_at,
+        based_on_version) -> entry name``. It raises to refuse the save, in
+        which case nothing is changed (see app.definition_log)."""
         self.db_path = str(db_path)
+        self.journal = journal
+        self._lock = threading.Lock()
         with self._conn() as c:
             c.executescript(_SCHEMA)
 
@@ -36,12 +43,13 @@ class DefinitionStore:
         return _db.connect(self.db_path, row_factory=True)
 
     def seed(self, codes: list[tuple[str, str]], kappa_lookup: dict[str, float | None],
-             model: str | None) -> None:
-        """Insert version 1 for any code not yet present.
+             model: str | None) -> int:
+        """Insert version 1 for any code not yet present. Returns how many.
 
         ``codes`` = list of (code_name, definition); ``kappa_lookup`` maps code
         name to its baseline Task 1 kappa (for ``model``).
         """
+        added = 0
         with self._conn() as c:
             existing = {r["code_name"] for r in c.execute(
                 "SELECT DISTINCT code_name FROM code_definitions")}
@@ -54,6 +62,8 @@ class DefinitionStore:
                     "VALUES (?, 1, ?, ?, ?, 1)",
                     (name, definition, kappa_lookup.get(name), model),
                 )
+                added += 1
+        return added
 
     def current(self, code_name: str) -> sqlite3.Row | None:
         with self._conn() as c:
@@ -78,21 +88,44 @@ class DefinitionStore:
         return {r["code_name"]: dict(r) for r in rows}
 
     def save_new(self, code_name: str, definition: str) -> dict:
-        """Archive the current version and make ``definition`` the new current."""
-        with self._conn() as c:
+        """Archive the current version and make ``definition`` the new current.
+
+        Text identical to the current version is not saved again: the current
+        row is returned with ``unchanged=True``. With a journal, the new
+        version is made durable first; if that fails nothing changes here.
+        """
+        with self._lock, self._conn() as c:
             cur = c.execute(
+                "SELECT * FROM code_definitions WHERE code_name=? AND is_current=1",
+                (code_name,)).fetchone()
+            if cur is not None and cur["definition"] == definition:
+                return {**dict(cur), "unchanged": True}
+            top = c.execute(
                 "SELECT MAX(version) AS v FROM code_definitions WHERE code_name=?",
                 (code_name,),
             ).fetchone()
-            next_version = (cur["v"] or 0) + 1
+            next_version = (top["v"] or 0) + 1
+            created_at = _utc_now()
+            entry = None
+            if self.journal is not None:
+                entry = self.journal(code_name, next_version, definition, created_at,
+                                     cur["version"] if cur is not None else None)
             c.execute("UPDATE code_definitions SET is_current=0 WHERE code_name=?",
                       (code_name,))
             c.execute(
                 "INSERT INTO code_definitions "
-                "(code_name, version, definition, kappa, model, is_current) "
-                "VALUES (?, ?, ?, NULL, NULL, 1)",
-                (code_name, next_version, definition),
+                "(code_name, version, definition, kappa, model, is_current, created_at) "
+                "VALUES (?, ?, ?, NULL, NULL, 1, ?)",
+                (code_name, next_version, definition, created_at),
             )
+            if entry is not None:
+                c.execute(
+                    "CREATE TABLE IF NOT EXISTS definition_log_applied ("
+                    "file_name TEXT PRIMARY KEY, code_name TEXT NOT NULL, "
+                    "version INTEGER NOT NULL, applied_at TEXT DEFAULT (datetime('now')))")
+                c.execute("INSERT OR IGNORE INTO definition_log_applied "
+                          "(file_name, code_name, version) VALUES (?, ?, ?)",
+                          (entry, code_name, next_version))
             row = c.execute(
                 "SELECT * FROM code_definitions WHERE code_name=? AND version=?",
                 (code_name, next_version),
@@ -117,3 +150,8 @@ class DefinitionStore:
                 (code_name,),
             ).fetchall()
         return rows[1]["kappa"] if len(rows) > 1 else None
+
+
+def _utc_now() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

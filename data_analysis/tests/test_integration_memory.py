@@ -41,14 +41,22 @@ class FakeSharePoint:
         return self.root / rel
 
     def list_folder(self, remote: str):
-        d = self._local(remote)
-        if not d.is_dir():
-            return []
         out = []
-        for p in sorted(d.iterdir()):
-            out.append({"name": p.name, "is_folder": p.is_dir(),
-                        "path": f"{remote.rstrip('/')}/{p.name}"})
+        d = self._local(remote)
+        if d.is_dir():
+            for p in sorted(d.iterdir()):
+                out.append({"name": p.name, "is_folder": p.is_dir(),
+                            "path": f"{remote.rstrip('/')}/{p.name}"})
+        prefix = remote.rstrip("/") + "/"
+        for path in sorted(self.state):
+            if path.startswith(prefix) and "/" not in path[len(prefix):]:
+                out.append({"name": path[len(prefix):], "is_folder": False, "path": path})
         return out
+
+    def create_bytes(self, remote: str, content: bytes):
+        if remote in self.state:
+            raise sp.AlreadyExists(remote)
+        return self.upload_bytes(remote, content)
 
     def download_bytes(self, remote: str) -> bytes:
         if remote in self.state:
@@ -80,12 +88,13 @@ class FakeSharePoint:
 def fake_env(monkeypatch, mem_db):
     fake = FakeSharePoint(TEMPLATE, config.SHAREPOINT_DIR)
     for name in ("configured", "list_folder", "download_bytes",
-                 "download_with_etag", "etag", "upload_bytes"):
+                 "download_with_etag", "etag", "upload_bytes", "create_bytes"):
         monkeypatch.setattr(sp, name, getattr(fake, name))
     monkeypatch.setattr(config, "AUTH_USERNAME", "u", raising=False)
     monkeypatch.setattr(config, "AUTH_PASSWORD", "p", raising=False)
     state_sync._reset_for_tests()
-    return fake
+    yield fake
+    state_sync._reset_for_tests()   # waits for background exports to finish
 
 
 def _login(client):
@@ -150,30 +159,76 @@ def test_definitions_csv_mirror_is_human_readable(fake_env):
         _login(c)
         code = _some_code(c)
         c.post("/api/definition", json={"code": code, "definition": "READABLE CHECK"})
-    assert state_sync.flush_exports(timeout=30)
+        assert state_sync.flush_exports(timeout=30)
     blob = fake_env.state[state_sync._csv_remote("definitions.csv")][0]
     rows = list(csv.reader(io.StringIO(blob.decode("utf-8"))))
     assert rows[0][:3] == ["code_name", "version", "definition"]
     assert any(r[0] == code and r[2] == "READABLE CHECK" for r in rows[1:])
 
 
-def test_save_reports_a_conflict_instead_of_success(fake_env):
-    """If SharePoint changed under the app, the edit goes to state/conflicts/ and
-    the app reloads the remote copy. The save must say so: reporting success for
-    an edit the page then does not show reads as a save button that does nothing."""
+def test_save_writes_only_a_small_log_entry(fake_env):
+    """A save must not re-upload the results database: it writes one new file
+    to the definition log and nothing else."""
     import app.main as main
     with TestClient(main.app) as c:
         _login(c)
         code = _some_code(c)
-        assert c.post("/api/definition",
-                      json={"code": code, "definition": "FIRST"}).status_code == 200
-        # Another writer replaces the remote blob behind the app's back.
-        remote = state_sync._db_remote()
-        blob, _ = fake_env.state[remote]
-        fake_env.upload_bytes(remote, blob)
-        r = c.post("/api/definition", json={"code": code, "definition": "LOST"})
-        assert r.status_code == 409
-        assert "conflicts" in r.json()["detail"]
-        assert any("/conflicts/" in k for k in fake_env.state)
+        state_sync.flush_exports(timeout=30)
+        db_before = fake_env.state.get(state_sync._db_remote())
+        before = set(fake_env.state)
+        r = c.post("/api/definition", json={"code": code, "definition": "LOGGED"})
+        assert r.status_code == 200
+        state_sync.flush_exports(timeout=30)
+        new = set(fake_env.state) - before
+        logs = [p for p in new if "/definition_log/" in p]
+        assert len(logs) == 1
+        assert fake_env.state.get(state_sync._db_remote()) == db_before, \
+            "a save re-uploaded the results database"
+
+
+def test_unchanged_save_writes_nothing(fake_env):
+    import app.main as main
+    with TestClient(main.app) as c:
+        _login(c)
+        code = _some_code(c)
+        cur = c.get("/api/definition", params={"code": code}).json()["current"]
+        before = dict(fake_env.state)
+        r = c.post("/api/definition", json={"code": code, "definition": cur["definition"]})
+        assert r.status_code == 200 and r.json()["unchanged"] is True
+        assert fake_env.state == before
+        again = c.get("/api/definition", params={"code": code}).json()["current"]
+        assert again["version"] == cur["version"]
+
+
+def test_edit_survives_restart_even_if_the_database_upload_never_happened(fake_env):
+    """The log alone carries an edit across a restart."""
+    import app.main as main
+    with TestClient(main.app) as c:
+        _login(c)
+        code = _some_code(c)
+        c.post("/api/definition", json={"code": code, "definition": "ONLY IN LOG"})
+    db._reset_anchor_for_tests()
+    state_sync._reset_for_tests()
+    with TestClient(main.app) as c:
+        _login(c)
         d = c.get("/api/definition", params={"code": code}).json()
-        assert d["current"]["definition"] == "FIRST"
+        assert d["current"]["definition"] == "ONLY IN LOG"
+        assert [h["definition"] for h in d["archived"]].count("ONLY IN LOG") == 0
+
+
+def test_saves_refused_when_the_log_cannot_be_read(fake_env, monkeypatch):
+    import app.main as main
+    real_list = fake_env.list_folder
+
+    def broken(remote):
+        if "definition_log" in remote:
+            raise sp.SharePointError("simulated outage")
+        return real_list(remote)
+    monkeypatch.setattr(sp, "list_folder", broken)
+    with TestClient(main.app) as c:
+        _login(c)
+        code = _some_code(c)
+        assert c.get("/api/definition", params={"code": code}).status_code == 200
+        r = c.post("/api/definition", json={"code": code, "definition": "BLOCKED"})
+        assert r.status_code == 503
+        assert not [p for p in fake_env.state if "/definition_log/" in p]

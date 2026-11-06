@@ -111,7 +111,7 @@ def main() -> int:
         mean = "n/a" if agg["mean"] is None else f"{agg['mean']:.4f}"
         med = "n/a" if agg["median"] is None else f"{agg['median']:.4f}"
         above = sum(1 for k in krs
-                    if k.kappa == k.kappa and k.kappa > config.KAPPA_TARGET)
+                    if config.meets_target(k.kappa))
         print(f"  {model:34s} mean κ {mean}  median {med}  "
               f"n={agg['n_scored']}  above target {above}")
     conn.close()

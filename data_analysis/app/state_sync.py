@@ -17,6 +17,10 @@ Data-safety design:
   our version to a unique ``state/conflicts/`` copy, log CRITICAL, and converge
   our memory to the remote. Both versions are preserved; nothing is silently
   lost.
+* **Definition edits go to a write-once log** (``app/definition_log.py``),
+  not into this blob; the log is merged in after every load.
+* **Shrink guard** — a push is refused if any definition version known to
+  exist is missing from the database being uploaded.
 * **Exports off the request path** — the CSV mirror and Excel workbook are
   rebuilt by a background worker after each push; only the blob is waited on.
 * **Corruption guard** — we never upload a blob that fails an integrity check,
@@ -35,12 +39,16 @@ import time
 import config
 import db
 from pipeline import export
+from . import definition_log
 from . import sharepoint_io as sp
 
 log = logging.getLogger("app.state_sync")
 
 _lock = threading.RLock()
 _etag: str | None = None  # ETag of the remote DB blob we last read/wrote
+# Every (code, version) known to be in the remote blob or the definition log.
+# push_state refuses to upload a database that lacks any of them.
+_known_defs: set[tuple[str, int]] = set()
 
 
 # --- remote paths -----------------------------------------------------------
@@ -80,6 +88,38 @@ def _sane(blob: bytes) -> bool:
         priv.close()
 
 
+def _defs_in(conn: sqlite3.Connection) -> set[tuple[str, int]]:
+    try:
+        return {(r[0], r[1]) for r in conn.execute(
+            "SELECT code_name, version FROM code_definitions")}
+    except sqlite3.OperationalError:
+        return set()   # table not created yet
+
+
+def _defs_in_blob(blob: bytes) -> set[tuple[str, int]]:
+    priv = sqlite3.connect(":memory:")
+    try:
+        priv.deserialize(blob)
+        return _defs_in(priv)
+    finally:
+        priv.close()
+
+
+def _defs_in_memory() -> set[tuple[str, int]]:
+    conn = db.connect()
+    try:
+        return _defs_in(conn)
+    finally:
+        conn.close()
+
+
+def _after_load() -> None:
+    """Merge the definition log into a freshly loaded DB and record what we hold."""
+    global _known_defs
+    definition_log.load_and_apply()
+    _known_defs |= _defs_in_memory()
+
+
 # --- hydrate ----------------------------------------------------------------
 
 def hydrate() -> bool:
@@ -96,7 +136,23 @@ def hydrate() -> bool:
         blob, tag = sp.download_with_etag(_db_remote())
     except sp.SharePointError as e:
         log.warning("No authoritative state DB (%s); trying legacy seed.", e)
-        return _hydrate_from_seed()
+        loaded = _hydrate_from_seed()
+        if not loaded:
+            # Merge the definition log (and so allow saves) only if the state
+            # DB is confirmed absent -- a fresh deployment. If it merely could
+            # not be read, saving stays off: edits made against an empty
+            # database would be numbered as if no history existed.
+            try:
+                absent = sp.etag(_db_remote()) is None
+            except sp.SharePointError:
+                absent = False
+            if absent:
+                with _lock:
+                    _after_load()
+            else:
+                log.critical("State DB exists but could not be loaded; saving "
+                             "definitions is OFF this session.")
+        return loaded
     try:
         db.load_blob(blob)
     except db.IntegrityError as e:
@@ -105,7 +161,9 @@ def hydrate() -> bool:
         return False
     with _lock:
         _etag = tag
-    log.info("Hydrated in-memory DB from SharePoint (%d bytes, etag=%s).", len(blob), tag)
+        _known_defs.update(_defs_in_blob(blob))
+        log.info("Hydrated in-memory DB from SharePoint (%d bytes, etag=%s).", len(blob), tag)
+        _after_load()
     return True
 
 
@@ -129,6 +187,7 @@ def _hydrate_from_seed() -> bool:
         return False
     with _lock:
         _etag = None
+        _after_load()
     log.info("Hydrated from legacy %s (%d bytes); state/%s will be created on first "
              "push.", config.SHAREPOINT_SEED_NAME, len(seed), config.SHAREPOINT_DB_NAME)
     return True
@@ -153,6 +212,12 @@ def push_state() -> bool:
         if not _sane(blob):
             log.error("Refusing to push an empty/corrupt DB image (safety guard).")
             return False
+        missing = _known_defs - _defs_in_blob(blob)
+        if missing:
+            log.critical("Refusing to push: %d definition version(s) known to exist "
+                         "are missing from the in-memory DB (e.g. %s). Nothing "
+                         "uploaded.", len(missing), sorted(missing)[:5])
+            return False
 
         wrote = False
         if _etag is None:
@@ -176,6 +241,7 @@ def push_state() -> bool:
         try:
             new_tag = sp.upload_bytes(_db_remote(), blob, if_match=_etag)
             _etag = new_tag
+            _known_defs.update(_defs_in_blob(blob))
             wrote = True
             log.info("Pushed state DB to SharePoint (%d bytes, etag=%s).", len(blob), new_tag)
         except sp.PreconditionFailed:
@@ -215,6 +281,8 @@ def _handle_conflict(our_blob: bytes) -> None:
         blob, tag = sp.download_with_etag(_db_remote())
         db.load_blob(blob)
         _etag = tag
+        # The remote copy may predate edits held only in the definition log.
+        _after_load()
         log.critical("Converged in-memory DB to remote; conflicting edits preserved "
                      "in the conflicts/ folder for manual merge.")
     except (sp.SharePointError, db.IntegrityError) as e:
@@ -230,27 +298,36 @@ def _handle_conflict(our_blob: bytes) -> None:
 _export_cv = threading.Condition()
 _export_pending = False
 _export_running = False
+_export_full = False      # a pending request wants every export, not just definitions
 
 
-def _schedule_exports() -> None:
-    global _export_pending, _export_running
+def _schedule_exports(full: bool = True) -> None:
+    global _export_pending, _export_running, _export_full
     with _export_cv:
         _export_pending = True
+        _export_full = _export_full or full
         if _export_running:
             return
         _export_running = True
     threading.Thread(target=_export_worker, name="state-export", daemon=True).start()
 
 
+def schedule_definitions_export() -> None:
+    """Refresh the readable definitions.csv after an edit (background, best-effort)."""
+    if sp.configured():
+        _schedule_exports(full=False)
+
+
 def _export_worker() -> None:
-    global _export_pending, _export_running
+    global _export_pending, _export_running, _export_full
     try:
         while True:
             with _export_cv:
                 if not _export_pending:
                     return
                 _export_pending = False
-            _run_exports()
+                full, _export_full = _export_full, False
+            _run_exports(full)
     finally:
         with _export_cv:
             _export_running = False
@@ -264,7 +341,7 @@ def flush_exports(timeout: float | None = None) -> bool:
             lambda: not _export_running and not _export_pending, timeout)
 
 
-def _run_exports() -> None:
+def _run_exports(full: bool = True) -> None:
     # Snapshot under the push lock (milliseconds), then build the exports from a
     # private copy, so the slow part never holds up a save or reads the shared
     # database while a conflict is replacing it.
@@ -277,6 +354,13 @@ def _run_exports() -> None:
         log.warning("Could not snapshot the DB for export (%s); exports skipped.", e)
         return
     try:
+        if not full:
+            try:
+                snap.row_factory = sqlite3.Row
+                _upload_definitions_csv(snap)
+            except Exception as e:  # noqa: BLE001
+                log.warning("definitions.csv upload failed (%s).", e)
+            return
         try:
             _export_csv_mirror(snap)
         except Exception as e:  # noqa: BLE001
@@ -356,13 +440,13 @@ def _upload_kappa_csv(conn) -> None:
     out = []
     for r in rows:
         k = r["kappa"]
-        meets = (k is not None) and k > config.KAPPA_TARGET
+        meets = config.meets_target(k)
         out.append((r["model"], r["code_name"], "" if k is None else round(k, 4),
                     r["n_documents"], r["n_human_present"], r["n_llm_present"], meets))
     data = _rows_to_csv(
         ["Model", "Code", "Cohen's kappa", "n_documents",
          "n_human_present", "n_llm_present",
-         f"meets_target_>{config.KAPPA_TARGET:g}"], out)
+         f"meets_target_>={config.KAPPA_TARGET:.2f}_2dp"], out)
     sp.upload_bytes(_csv_remote("kappa.csv"), data)
 
 
@@ -387,8 +471,56 @@ def _upload_coding_results_csv(conn) -> None:
 
 # --- tests ------------------------------------------------------------------
 
+# --- daily snapshot -----------------------------------------------------------
+#
+# One write-once copy of the whole in-memory DB per day under
+# state/backups/YYYY-MM-DD/, so recovery never depends on SharePoint's limited
+# version history. Created with create_bytes: an existing snapshot is never
+# replaced. Nothing here deletes old snapshots; prune by hand if ever needed.
+
+SNAPSHOT_EVERY_S = 6 * 3600
+
+
+def _snapshot_remote(day: str) -> str:
+    return f"{config.SHAREPOINT_STATE_DIR}/backups/{day}/{config.SHAREPOINT_DB_NAME}"
+
+
+def snapshot_today() -> bool:
+    """Write today's snapshot if there is none yet. True if one was written."""
+    if not sp.configured():
+        return False
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    with _lock:
+        blob = db.dump_blob()
+    if not _sane(blob):
+        log.error("Not snapshotting an empty/corrupt DB image.")
+        return False
+    try:
+        sp.create_bytes(_snapshot_remote(day), blob)
+    except sp.AlreadyExists:
+        return False
+    except sp.SharePointError as e:
+        log.warning("Daily snapshot failed (%s); will retry.", e)
+        return False
+    log.info("Wrote daily snapshot %s (%d bytes).", _snapshot_remote(day), len(blob))
+    return True
+
+
+def start_snapshot_timer() -> None:
+    def loop():
+        while True:
+            try:
+                snapshot_today()
+            except Exception as e:  # noqa: BLE001
+                log.warning("Daily snapshot error (%s).", e)
+            time.sleep(SNAPSHOT_EVERY_S)
+    threading.Thread(target=loop, name="state-snapshot", daemon=True).start()
+
+
 def _reset_for_tests() -> None:
-    global _etag
+    global _etag, _known_defs
     flush_exports(timeout=30)
+    definition_log._reset_for_tests()
     with _lock:
         _etag = None
+        _known_defs = set()

@@ -374,6 +374,19 @@ MALFORMED_RETRY_ATTEMPTS = int(os.getenv("AICODE_MALFORMED_RETRIES", "3"))
 # Cohen's kappa target (spec 4.8).
 KAPPA_TARGET = float(os.getenv("AICODE_KAPPA_TARGET", "0.80"))
 
+
+def meets_target(kappa) -> bool:
+    """A code meets the target if its kappa, rounded to 2 decimal places, is at
+    least KAPPA_TARGET: kappa >= 0.795 for a 0.80 target (round half up).
+
+    Kappas are reported to 2 dp, so a code shown as 0.80 counts as reaching
+    0.80 (decided 2026-11-06). The tiny tolerance absorbs floating-point error,
+    so a kappa that is exactly 0.795 but computed as 0.79499999... still counts.
+    """
+    if kappa is None or kappa != kappa:   # missing or NaN
+        return False
+    return kappa >= KAPPA_TARGET - 0.005 - 1e-9
+
 # --- Auth (Task 2 app) -------------------------------------------------------
 AUTH_USERNAME = os.getenv("AUTH_USERNAME")
 AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
