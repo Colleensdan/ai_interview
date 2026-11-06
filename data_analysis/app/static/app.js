@@ -160,19 +160,6 @@ function renderStart(root) {
       el("div", { class: "lbl" }, `codes scored  ·  model: ${esc(o.model)}`)),
   ));
 
-  // Codes deliberately not sent to the model. Stated rather than omitted, so
-  // the codebook total and the scored total don't look like a discrepancy.
-  if ((o.excluded || []).length) {
-    // Two distinct reasons live in this list (see config.EXCLUDED_CODES): the
-    // "summary" parent category, and codes the human coders withdrew from the
-    // ground truth. Naming only one would mislabel the other.
-    wrap.append(el("div", { class: "notice" },
-      `${o.excluded.length} code(s) excluded from coding and κ — an ATLAS.ti `
-      + `parent category with no definition of its own, or codes the human `
-      + `coders withdrew from the ground truth: `
-      + o.excluded.join(", ")));
-  }
-
   const mkCol = (title, items, footer) => {
     const list = el("div", { class: "codelist" });
     items.forEach((it) => list.append(codeItem(it)));
