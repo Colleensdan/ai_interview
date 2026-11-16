@@ -228,9 +228,17 @@ def test_a_parser_change_is_a_mismatch(monkeypatch):
 
 # --- end to end ------------------------------------------------------------------
 
+def _line_of(request, title):
+    """A real line of *title*'s transcript, as sent in *request*, so the quote
+    check accepts it for that interview."""
+    block = request.merged_document.split(f"===== BEGIN DOCUMENT | title: {title} =====\n", 1)[1]
+    return next(line for line in block.splitlines() if len(line.strip()) > 20)
+
+
 class _Model(ModelAdapter):
-    """Finds the code in the first document of each batch. Scripted replies
-    (keyed by code and first title) are served first -- e.g. an off-task one."""
+    """Finds the code in the first document of each batch, quoting a real line
+    of it. Scripted replies (keyed by code and first title) are served first --
+    e.g. an off-task one."""
 
     def __init__(self, name="raw-model", script=None, always_malformed=()):
         self.name = name
@@ -248,10 +256,10 @@ class _Model(ModelAdapter):
             queue = self.script.get((request.code_name, request.document_titles[0]))
             if queue:
                 return RawReply(queue.pop(0), "stop")
+        title = request.document_titles[0]
         return RawReply(json.dumps({"occurrences": [{
-            "document_title": request.document_titles[0],
-            "quote": f"quote for {request.code_name}", "reason": "r"}]}),
-            "stop", {"temperature": 0})
+            "document_title": title, "quote": _line_of(request, title),
+            "reason": "r"}]}), "stop", {"temperature": 0})
 
 
 @pytest.fixture

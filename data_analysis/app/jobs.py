@@ -21,7 +21,7 @@ from collections import deque
 import config
 import db as _db
 from models import available_adapters
-from pipeline.coding import code_across_batches, make_batches
+from pipeline.coding import code_and_check, make_batches
 from pipeline import storage
 from pipeline.agreement import match_codes, per_code_kappa
 from pipeline.interviews import select_sample
@@ -177,14 +177,18 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
 
         for adapter in adapters:
             hits = []
+            # Interviews coded again alone whose quotes were still not in their
+            # own transcript: no verdict, so no cell (see build_count_matrix).
+            no_verdict: dict[str, list[str]] = {}
             for code in codes:
                 _update_job(job_id, message=f"{adapter.name}: {code}")
                 t0 = time.time()
-                code_hits = code_across_batches(
+                result = code_and_check(
                     adapter, code, defs[code], batches, note=lambda m: None)
-                hits.extend(code_hits)
+                hits.extend(result.hits)
+                no_verdict[code] = result.unresolved
                 # Live feed: persist each positive hit (code + quote) as it lands.
-                for h in code_hits:
+                for h in result.hits:
                     _add_hit(job_id, h.code_name, h.quote)
                 durations.append(time.time() - t0)
                 done += 1
@@ -193,7 +197,7 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
                 _update_job(job_id, done=done, eta_seconds=round(eta, 1))
             storage.insert_coding_results(conn, run_id, adapter.name, hits,
                                           code_names=codes)
-            matrix = build_count_matrix(hits, codes, titles)
+            matrix = build_count_matrix(hits, codes, titles, no_verdict)
             storage.insert_count_matrix(conn, run_id, adapter.name, matrix, codes, titles)
             per_model_matrices.append((adapter.name, matrix))
             krs = per_code_kappa(codes, gt_counts, matrix, doc_pairs, code_to_gt)

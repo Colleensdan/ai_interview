@@ -168,8 +168,11 @@ def workbook_bytes(conn: sqlite3.Connection, code_names: list[str] | None = None
     ws.append(["Cells: quotations per interview (humans, models). Majority "
                "vote: 1/0 under the presence-majority rule; runs scored before "
                "2026-10-06 stored the count-plurality vote, a count. Blank = that "
-               "source never coded that code or interview. Each column comes from "
-               "the run its kappa on the site came from (see Run)."])
+               "source never coded that code or interview, or has no verdict "
+               "on it: the model's quotes for it were not in its transcript, "
+               "even when it was coded again on its own, so it is left out of "
+               "that code's kappa. Each column comes from the run its kappa on "
+               "the site came from (see Run)."])
     excluded = sorted(set(config.EXCLUDED_CODES))
     if excluded:
         ws.append([f"Excluded from coding and kappa: {', '.join(excluded)}"])

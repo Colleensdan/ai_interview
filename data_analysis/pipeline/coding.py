@@ -18,12 +18,15 @@ from __future__ import annotations
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from typing import Callable
 
 import config
 from models.base import (CodingRequest, MalformedResponseError, SCOPE_INTERVIEWEE,
                          SCOPE_INTERVIEWER, TruncatedResponseError)
 from models.prompting import parse_occurrences
 from pipeline.interviews import Interview, merge_documents
+from pipeline.quote_check import Transcript, quote_in_text
 
 #: Substrings marking a failure of the infrastructure rather than of the model.
 #: These must be retried, not recorded: the caller's fallback is to DROP the code
@@ -249,3 +252,108 @@ def code_across_batches(adapter, code_name: str, definition: str,
         for fut in as_completed(futures):
             results[futures[fut]] = fut.result()
     return [hit for batch in results for hit in batch]
+
+
+# --- quote check and re-coding --------------------------------------------------
+#
+# A model coding 25 interviews at once sometimes files a sentence from one
+# interview as the evidence for another (see pipeline.quote_check). The batch
+# reply's verdict on that interview is then unreliable, so the interview is
+# coded again ON ITS OWN, where there is no other interview to borrow from, and
+# the new verdict replaces the batch's. Only the transcript decides what is
+# re-coded -- never the human coding -- so the rule cannot steer a result toward
+# the ground truth.
+
+#: batch_label prefix of a re-coding request: "recode:<title>:<attempt>".
+RECODE_LABEL = "recode"
+
+
+def recode_label(title: str, attempt: int) -> str:
+    return f"{RECODE_LABEL}:{title}:{attempt}"
+
+
+@dataclass
+class CodeResult:
+    """One code's occurrences for one model, after the quote check."""
+
+    hits: list
+    #: Interviews coded again on their own, in batch order.
+    recoded: list[str] = field(default_factory=list)
+    #: Of those, interviews whose quotes still could not be found after
+    #: ``config.RECODE_ATTEMPTS`` tries. Their verdict is unknown: they carry no
+    #: occurrences and are left out of this code's kappa, never scored absent.
+    unresolved: list[str] = field(default_factory=list)
+
+
+def interviews_to_recode(hits, batches: list[list[Interview]]) -> list[str]:
+    """Interviews whose verdict for this code must be re-coded alone.
+
+    * every interview named by an occurrence whose quote is not in it;
+    * the interview the quote really came from, when that is exactly one other
+      interview of the same batch and the reply gave it no valid occurrence --
+      its "absent" is as unreliable as the named interview's "present". A quote
+      found in several other interviews ("I don't know") identifies no source.
+    """
+    text = {iv.title: Transcript(iv.text) for docs in batches for iv in docs}
+    batch_of = {iv.title: [d.title for d in docs] for docs in batches for iv in docs}
+    valid, bad = set(), []
+    for h in hits:
+        if quote_in_text(h.quote, text[h.document_title]):
+            valid.add(h.document_title)
+        else:
+            bad.append(h)
+    cells = {h.document_title for h in bad}
+    for h in bad:
+        sources = [d for d in batch_of[h.document_title]
+                   if d != h.document_title and quote_in_text(h.quote, text[d])]
+        if len(sources) == 1 and sources[0] not in valid:
+            cells.add(sources[0])
+    return [iv.title for docs in batches for iv in docs if iv.title in cells]
+
+
+def apply_recodes(hits, batches: list[list[Interview]],
+                  fetch: Callable[[Interview, int], list],
+                  note=print) -> CodeResult:
+    """The re-coding rule, independent of where re-coded replies come from.
+
+    ``fetch(interview, attempt)`` returns the occurrences of one request that
+    sends *interview* alone. The coding pipeline asks the model; ``verify_run``
+    replays the stored reply. An attempt is accepted when every quote in it is
+    found in the interview (an empty answer is accepted: "absent"), and then
+    replaces everything the batch said about that interview.
+    """
+    cells = interviews_to_recode(hits, batches)
+    if not cells:
+        return CodeResult(list(hits))
+    by_title = {iv.title: iv for docs in batches for iv in docs}
+    kept = [h for h in hits if h.document_title not in cells]
+    unresolved = []
+    for title in cells:
+        iv, transcript = by_title[title], Transcript(by_title[title].text)
+        for attempt in range(1, config.RECODE_ATTEMPTS + 1):
+            new = fetch(iv, attempt)
+            if all(quote_in_text(h.quote, transcript) for h in new):
+                kept.extend(new)
+                break
+            note(f"    · re-coding {title} alone (attempt {attempt}): a quote is "
+                 f"still not in the interview")
+        else:
+            unresolved.append(title)
+            note(f"    ! {title}: quotes still not found after "
+                 f"{config.RECODE_ATTEMPTS} attempt(s); left out of this code's kappa")
+    return CodeResult(kept, recoded=cells, unresolved=unresolved)
+
+
+def code_and_check(adapter, code_name: str, definition: str,
+                   batches: list[list[Interview]], note=print, *,
+                   recorder=None) -> CodeResult:
+    """Code one code across every batch, then re-code alone any interview the
+    quote check finds unreliable (see :func:`apply_recodes`)."""
+    hits = code_across_batches(adapter, code_name, definition, batches, note,
+                               recorder=recorder)
+
+    def ask_alone(iv: Interview, attempt: int) -> list:
+        return code_batch(adapter, code_name, definition, [iv], note,
+                          recorder=recorder, batch_label=recode_label(iv.title, attempt))
+
+    return apply_recodes(hits, batches, ask_alone, note)

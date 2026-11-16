@@ -202,20 +202,28 @@ def write_matrix_csv(
     code_names: list[str],
     documents: list[str],
 ) -> None:
-    """Wide matrix: first column = code names, remaining columns = documents."""
+    """Wide matrix: first column = code names, remaining columns = documents.
+
+    A cell with no verdict (see ``_matrix_rows``) is written blank, not 0."""
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["Code"] + documents)
         for code in code_names:
             row = matrix.get(code, {})
-            w.writerow([code] + [row.get(d, 0) for d in documents])
+            w.writerow([code] + [row.get(d, "") for d in documents])
 
 
-def _matrix_rows(matrix: Matrix, code_names, documents):
+def _matrix_rows(matrix: Matrix, code_names, documents, *, fill: int | None = None):
+    """One (code, document, count) per cell. A model's or the vote's missing
+    cell is "no verdict" (matrices.build_count_matrix) and gets no row; pass
+    ``fill=0`` for the human matrix, where a missing cell means "not coded"."""
     for code in code_names:
         row = matrix.get(code, {})
         for doc in documents:
-            yield code, doc, row.get(doc, 0)
+            if doc in row:
+                yield code, doc, row[doc]
+            elif fill is not None:
+                yield code, doc, fill
 
 
 def insert_count_matrix(
@@ -268,7 +276,7 @@ def insert_ground_truth_matrix(conn, matrix, code_names, documents) -> None:
     conn.executemany(
         "INSERT INTO ground_truth_matrix (code_name, document, count) "
         "VALUES (?, ?, ?)",
-        [(c, d, n) for c, d, n in _matrix_rows(matrix, code_names, documents)],
+        [(c, d, n) for c, d, n in _matrix_rows(matrix, code_names, documents, fill=0)],
     )
     conn.commit()
 

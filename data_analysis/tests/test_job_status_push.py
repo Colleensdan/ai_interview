@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from app import jobs, state_sync
+from pipeline.coding import CodeResult
 from pipeline.interviews import Interview
 
 from test_state_sync import _seed_db, fake_sp  # noqa: F401  (fixture)
@@ -63,7 +64,7 @@ def _pushed_job(fake_store, job_id: str) -> tuple:
 def stubbed(monkeypatch, fake_sp):  # noqa: F811
     monkeypatch.setattr(jobs, "available_adapters", lambda: [_Adapter()])
     monkeypatch.setattr(jobs, "select_sample", lambda ivs: ivs)
-    monkeypatch.setattr(jobs, "code_across_batches", lambda *a, **k: [])
+    monkeypatch.setattr(jobs, "code_and_check", lambda *a, **k: CodeResult([]))
     _seed_db()          # a realistic results DB: the push guard refuses an empty one
     jobs._ensure_tables()
     return fake_sp

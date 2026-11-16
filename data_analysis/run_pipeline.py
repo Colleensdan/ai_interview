@@ -27,7 +27,7 @@ import config
 from models import available_adapters
 from pipeline.agreement import match_codes, mean_kappa
 from pipeline.codebook import load_codebook
-from pipeline.coding import code_across_batches, failure_kind, make_batches, returns_raw
+from pipeline.coding import code_and_check, failure_kind, make_batches, returns_raw
 from pipeline.ground_truth import load_ground_truth_counts
 from pipeline.interviews import load_interviews, select_sample
 from pipeline.matrices import build_count_matrix, majority_vote
@@ -319,7 +319,9 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                         rc.close()
 
             try:
-                code_hits = code_across_batches(
+                # Coded in batches, then every interview whose quotes are not in
+                # its own transcript is coded again alone (pipeline.coding).
+                result = code_and_check(
                     adapter, code.name, code.definition, batches, note=_note,
                     recorder=recorder)
             except Exception as exc:  # noqa: BLE001
@@ -336,20 +338,26 @@ def run(max_codes: int | None = None, max_docs: int | None = None, label: str = 
                       f"{time.time() - t0:.0f}s ({type(exc).__name__}: {exc}); "
                       f"excluded from this run.", flush=True)
                 continue
-            hits.extend(code_hits)
+            hits.extend(result.hits)
             # Persist immediately: a model killed at code 30 keeps 29 codes.
+            # An unresolved interview gets no cell (no verdict), not a 0.
             with write_lock:
                 wconn = storage.init_db(config.DB_PATH)
                 try:
                     storage.persist_code(
                         wconn, run_id, adapter.name, code.name,
-                        build_count_matrix(code_hits, [code.name], titles),
-                        titles, code_hits, code_attempt)
+                        build_count_matrix(result.hits, [code.name], titles,
+                                           {code.name: result.unresolved}),
+                        titles, result.hits, code_attempt)
                 finally:
                     wconn.close()
+            recoded = (f", {len(result.recoded)} interview(s) re-coded alone"
+                       + (f", {len(result.unresolved)} unresolved: "
+                          f"{', '.join(result.unresolved)}" if result.unresolved else "")
+                       if result.recoded else "")
             print(f"    {prefix} [{i}/{len(todo)}] {code.name}: "
-                  f"{len(code_hits)} occurrence(s) ({time.time() - t0:.0f}s)",
-                  flush=True)
+                  f"{len(result.hits)} occurrence(s){recoded} "
+                  f"({time.time() - t0:.0f}s)", flush=True)
 
         # Read back what the run now holds for this model: with a resume that
         # includes codes an earlier invocation coded, which `hits` does not.

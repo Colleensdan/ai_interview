@@ -14,16 +14,25 @@ def build_count_matrix(
     hits: Iterable[CodeHit],
     code_names: list[str],
     documents: list[str],
+    no_verdict: dict[str, Iterable[str]] | None = None,
 ) -> Matrix:
     """Count, per code per document, how many occurrences a model reported.
 
-    Always returns a dense matrix: every code x document cell is present (0 if
-    the model reported nothing there).
+    Every code x document cell is present (0 if the model reported nothing
+    there) EXCEPT the cells in ``no_verdict`` ({code: documents}): interviews
+    the model could not be shown to have coded correctly (see
+    ``pipeline.coding.apply_recodes``). A missing cell means "no verdict"
+    everywhere downstream -- the model abstains from the vote there, and the
+    document is left out of that model's kappa -- so it is never confused with
+    "absent". It is stored as no row and exported as a blank cell.
     """
     matrix: Matrix = {c: {d: 0 for d in documents} for c in code_names}
     for hit in hits:
         if hit.code_name in matrix and hit.document_title in matrix[hit.code_name]:
             matrix[hit.code_name][hit.document_title] += 1
+    for code, docs in (no_verdict or {}).items():
+        for doc in docs:
+            matrix.get(code, {}).pop(doc, None)
     return matrix
 
 
@@ -51,17 +60,22 @@ def majority_vote(
 
     A model that did not code a code (it FAILED for that model) is not a voter
     on it: counting it as "absent" would pull the vote toward absent for a
-    reason unrelated to the transcript. A code that NO model coded is left out
-    of the result entirely, so nothing downstream can score a vote that was
-    never taken. With one model the vote is that model's presence.
+    reason unrelated to the transcript. The same holds cell by cell: a model
+    with no verdict on one interview (no cell; see build_count_matrix) abstains
+    there, and an interview no voter has a verdict on gets no vote cell either.
+    A code that NO model coded is left out of the result entirely, so nothing
+    downstream can score a vote that was never taken. With one model the vote
+    is that model's presence.
     """
     result: Matrix = {}
     for code in code_names:
         voters = [m[code] for m in matrices if code in m]
         if not voters:
             continue
-        result[code] = {
-            doc: int(2 * sum(1 for v in voters if v.get(doc, 0) > 0) > len(voters))
-            for doc in documents
-        }
+        row = {}
+        for doc in documents:
+            votes = [v[doc] for v in voters if doc in v]
+            if votes:
+                row[doc] = int(2 * sum(1 for n in votes if n > 0) > len(votes))
+        result[code] = row
     return result

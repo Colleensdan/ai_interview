@@ -95,6 +95,7 @@ def build(*, codes, sample, adapters, definitions: str, definitions_src,
     """The provenance record for one invocation."""
     from models.prompting import PARSER_VERSION, SYSTEM_PROMPT, _INTERVIEWER_SCOPE
     from pipeline.matrices import VOTE_RULE
+    from pipeline.quote_check import QUOTE_CHECK_VERSION
 
     must_match = {
         "parser_version": PARSER_VERSION,
@@ -114,6 +115,9 @@ def build(*, codes, sample, adapters, definitions: str, definitions_src,
         "docs_per_call": config.DOCS_PER_CALL,
         "max_output_tokens": config.MAX_OUTPUT_TOKENS,
         "malformed_retry_attempts": config.MALFORMED_RETRY_ATTEMPTS,
+        # Which quotes send an interview back to be coded alone, and how often.
+        "quote_check_version": QUOTE_CHECK_VERSION,
+        "recode_attempts": config.RECODE_ATTEMPTS,
         "excluded_codes": sorted(config.EXCLUDED_CODES),
         "interviewer_only_codes": sorted(config.INTERVIEWER_ONLY_CODES),
         "sample_fraction": config.SAMPLE_FRACTION,

@@ -10,10 +10,13 @@ link fails:
                   committed when they ran;
 2. inputs      -- the codebook/definitions and transcripts on disk now are the
                   ones the run used (same fingerprints);
-3. replies     -- for every (model, code) the run stored, the accepted replies
-                  cover every document exactly once, each was sent the prompt
-                  rebuilt from today's inputs (SHA-256 match), and re-parsing
-                  them reproduces the stored count matrix and quotes exactly;
+3. replies     -- for every (model, code) the run stored, the accepted batch
+                  replies cover every document exactly once, each reply was
+                  sent the prompt rebuilt from today's inputs (SHA-256 match),
+                  and re-parsing them -- replaying the quote check and every
+                  re-coding of an interview alone -- reproduces the stored
+                  count matrix (including cells with no verdict) and quotes
+                  exactly;
 4. scoring     -- recomputing the majority vote and every kappa from the stored
                   matrices with ``pipeline.scoring.score`` reproduces the
                   stored kappa table exactly.
@@ -40,9 +43,14 @@ from models.prompting import (PARSER_VERSION, SYSTEM_PROMPT, build_user_prompt,
                               extract_json, parse_occurrences)
 from pipeline import provenance, scoring, storage
 from pipeline.agreement import match_codes
+from pipeline.coding import RECODE_LABEL, apply_recodes, make_batches, recode_label
 from pipeline.ground_truth import load_ground_truth_counts
 from pipeline.interviews import load_interviews, merge_documents, select_sample
 from pipeline.matrices import build_count_matrix
+
+
+class _Unverifiable(Exception):
+    """A stored reply cannot be matched to the request it answers."""
 
 
 class Report:
@@ -148,6 +156,7 @@ def verify(conn: sqlite3.Connection, run_id: str, definitions_db=None,
         return r
     titles = [iv.title for iv in sample]
     docs_by_title = {iv.title: iv for iv in sample}
+    batches = make_batches(sample)
 
     # 3. replies ----------------------------------------------------------------
     r.section("3. stored results re-derived from raw replies")
@@ -175,30 +184,60 @@ def verify(conn: sqlite3.Connection, run_id: str, definitions_db=None,
                 why = "final replies come from more than one coding attempt"
             elif any(row[4] != "accepted" for row in rows):
                 why = "a final reply was not an accepted one"
-            else:
-                covered = Counter(t for row in rows for t in json.loads(row[2]))
+            batch_rows = [row for row in rows
+                          if not row[1].startswith(RECODE_LABEL + ":")]
+            recode_rows = {row[1]: row for row in rows
+                           if row[1].startswith(RECODE_LABEL + ":")}
+            if why is None:
+                covered = Counter(t for row in batch_rows for t in json.loads(row[2]))
                 if covered != Counter(titles):
-                    why = "accepted replies do not cover every document exactly once"
-            hits = []
+                    why = "accepted batch replies do not cover every document exactly once"
+            hits, unresolved = [], []
             if why is None:
                 scope = (SCOPE_INTERVIEWER if code_name in config.INTERVIEWER_ONLY_CODES
                          else SCOPE_INTERVIEWEE)
-                for row in rows:
+
+                def reparse(row, _code=code, _scope=scope):
                     batch_titles = tuple(json.loads(row[2]))
                     req = CodingRequest(
-                        code_name=code_name, code_description=code.definition,
+                        code_name=code_name, code_description=_code.definition,
                         merged_document=merge_documents(
                             [docs_by_title[t] for t in batch_titles]),
-                        document_titles=batch_titles, scope=scope)
+                        document_titles=batch_titles, scope=_scope)
                     digest = provenance.prompt_sha256(SYSTEM_PROMPT, build_user_prompt(req))
                     if digest != row[3]:
-                        why = f"batch {row[1]}: prompt differs from the one sent"
-                        break
-                    hits.extend(parse_occurrences(row[5], req))
+                        raise _Unverifiable(f"batch {row[1]}: prompt differs from the one sent")
+                    return parse_occurrences(row[5], req)
+
+                used = set()
+
+                def replay(iv, attempt):
+                    label = recode_label(iv.title, attempt)
+                    row = recode_rows.get(label)
+                    if row is None or json.loads(row[2]) != [iv.title]:
+                        raise _Unverifiable(f"no stored reply for re-coding {label}")
+                    used.add(label)
+                    return reparse(row)
+
+                try:
+                    for row in batch_rows:
+                        hits.extend(reparse(row))
+                    # The quote check is re-run here, not trusted: it decides
+                    # which re-coding replies the result needs, and every one
+                    # must be stored -- and no other.
+                    result = apply_recodes(hits, batches, replay, note=lambda _m: None)
+                    hits, unresolved = result.hits, result.unresolved
+                    if used != set(recode_rows):
+                        why = (f"{len(set(recode_rows) - used)} stored re-coding "
+                               f"reply(ies) the quote check does not call for")
+                except _Unverifiable as exc:
+                    why = str(exc)
             if why is None:
-                rebuilt = build_count_matrix(hits, [code_name], titles)[code_name]
-                if {d: rebuilt.get(d, 0) for d in titles} != \
-                        {d: stored[model][code_name].get(d, 0) for d in titles}:
+                rebuilt = build_count_matrix(hits, [code_name], titles,
+                                             {code_name: unresolved})[code_name]
+                if rebuilt != {d: n for d, n in stored[model][code_name].items()
+                               if d in titles} \
+                        or set(stored[model][code_name]) - set(titles):
                     why = "re-parsed count matrix differs from the stored one"
             if why is None:
                 quotes = Counter((h.document_title, h.quote, h.reason) for h in hits)

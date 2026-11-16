@@ -371,6 +371,14 @@ QUOTA_RETRY_MAX_SECONDS = float(os.getenv("AICODE_QUOTA_RETRY_MAX", "180"))
 # (raw_responses), so the re-asks are disclosed, not hidden.
 MALFORMED_RETRY_ATTEMPTS = int(os.getenv("AICODE_MALFORMED_RETRIES", "3"))
 
+# Times an interview is coded again ON ITS OWN when a quote the model filed
+# under it cannot be found in its transcript (pipeline.quote_check). Batched
+# requests let a model reuse a sentence from one interview as evidence for
+# another; alone, there is nothing to borrow from. An interview whose quotes are
+# still not found after this many attempts is left out of that code's kappa
+# (no verdict), never scored as absent. See pipeline.coding.apply_recodes.
+RECODE_ATTEMPTS = int(os.getenv("AICODE_RECODE_ATTEMPTS", "3"))
+
 # Cohen's kappa target (spec 4.8).
 KAPPA_TARGET = float(os.getenv("AICODE_KAPPA_TARGET", "0.80"))
 

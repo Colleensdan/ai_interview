@@ -122,12 +122,18 @@ def per_code_kappa(
 
     ``code_to_gt`` maps each codebook code to its ground-truth code name (see
     :func:`match_codes`); without it, an exact name match is assumed.
+
+    A document the model's row has no cell for is a document the model gave no
+    verdict on (see ``matrices.build_count_matrix``) and is left out of that
+    code's kappa, so ``n_documents`` can be below ``len(doc_pairs)``. Stored
+    matrices are otherwise dense, so this changes nothing for them.
     """
     results: list[KappaResult] = []
     for code in code_names:
         gt_code = code_to_gt.get(code, code) if code_to_gt else code
         llm_row = llm_matrix.get(code, {})
-        llm_vec = [_present(llm_row.get(title, 0)) for title, _ in doc_pairs]
+        pairs = [(title, hkey) for title, hkey in doc_pairs if title in llm_row]
+        llm_vec = [_present(llm_row[title]) for title, _ in pairs]
 
         if gt_code is None:
             # No human row exists for this code (the humans dropped it from the
@@ -138,18 +144,18 @@ def per_code_kappa(
             # for a code nobody could score. Report it as unscored instead, so
             # it is excluded from the average rather than inflating it.
             results.append(
-                KappaResult(code, math.nan, len(doc_pairs), 0, sum(llm_vec),
+                KappaResult(code, math.nan, len(pairs), 0, sum(llm_vec),
                             no_ground_truth=True)
             )
             continue
 
         human_row = human_counts.get(gt_code, {})
-        human_vec = [_present(human_row.get(hkey, 0)) for _, hkey in doc_pairs]
+        human_vec = [_present(human_row.get(hkey, 0)) for _, hkey in pairs]
         results.append(
             KappaResult(
                 code_name=code,
                 kappa=cohen_kappa(human_vec, llm_vec),
-                n_documents=len(doc_pairs),
+                n_documents=len(pairs),
                 n_human_present=sum(human_vec),
                 n_llm_present=sum(llm_vec),
             )
