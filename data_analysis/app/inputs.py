@@ -52,17 +52,15 @@ class InputStore:
     def set_gt_quotes(self, data: bytes) -> None:
         self._gt_quotes = data
 
-    def route(self, rel_path: str, data: bytes) -> bool:
-        """Store a downloaded file by its path relative to the SharePoint base.
-
-        Returns True if the file was recognised as one of the four inputs.
-        """
+    def _setter(self, rel_path: str):
+        """Where a file at *rel_path* would be stored, or None if it is not an
+        input. Decided by path alone, so a file can be skipped before it is
+        downloaded."""
         name = Path(rel_path).name
         parts = {p.lower() for p in Path(rel_path).parts}
         interviews_dir = Path(config.INTERVIEWS_DIR).name.lower()
         if name.lower().endswith(tuple(config.TRANSCRIPT_EXTS)) and interviews_dir in parts:
-            self.put_interview(name, data)
-            return True
+            return lambda data: self.put_interview(name, data)
         # Workbook names differ between exports, so match case-insensitively on
         # the configured filenames rather than on literals.
         for configured, setter in (
@@ -71,9 +69,24 @@ class InputStore:
             (config.GROUND_TRUTH_QUOTES_PATH, self.set_gt_quotes),
         ):
             if name.lower() == Path(configured).name.lower():
-                setter(data)
-                return True
-        return False
+                return setter
+        return None
+
+    def recognises(self, rel_path: str) -> bool:
+        """True if a file at *rel_path* (relative to the SharePoint base) is one
+        of the four inputs, i.e. :meth:`route` would store it."""
+        return self._setter(rel_path) is not None
+
+    def route(self, rel_path: str, data: bytes) -> bool:
+        """Store a downloaded file by its path relative to the SharePoint base.
+
+        Returns True if the file was recognised as one of the four inputs.
+        """
+        setter = self._setter(rel_path)
+        if setter is None:
+            return False
+        setter(data)
+        return True
 
     def has_interviews(self) -> bool:
         return self._from_disk or bool(self._interview_files)

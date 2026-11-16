@@ -53,6 +53,15 @@ def sync() -> InputStore:
 # --- memory mode (RAM-only) -------------------------------------------------
 
 def _download_into_store(base: str, remote: str, store: InputStore) -> int:
+    """Download the input files under *remote* into *store*.
+
+    Only files the store recognises as inputs are downloaded. The folder also
+    holds the app's own state -- the results DB, a daily snapshot of it,
+    conflict copies -- and every boot used to download all of it and throw it
+    away: 344 MB in 149 files on 2026-11-16 for about 3 MB of inputs, growing by
+    20 MB a day. A dropped connection on any one of those downloads stopped the
+    app from starting.
+    """
     count = 0
     for item in sp.list_folder(remote):
         if _ignored(item["name"]) or item["name"] == SEED_DB_NAME:
@@ -61,7 +70,7 @@ def _download_into_store(base: str, remote: str, store: InputStore) -> int:
             count += _download_into_store(base, item["path"], store)
         else:
             rel = item["path"][len(base):].lstrip("/")
-            if store.route(rel, sp.download_bytes(item["path"])):
+            if store.recognises(rel) and store.route(rel, sp.download_bytes(item["path"])):
                 count += 1
     return count
 

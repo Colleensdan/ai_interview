@@ -85,12 +85,12 @@ def _get_drive_id(token: str) -> str:
     sp_site_path = _must_env("SP_SITE_PATH")
     library_name = _must_env("SP_LIBRARY_NAME")
 
-    r = requests.get(f"{GRAPH_ROOT}/sites/{sp_hostname}:{sp_site_path}", headers=headers, timeout=30)
+    r = _get(f"{GRAPH_ROOT}/sites/{sp_hostname}:{sp_site_path}", headers, 30)
     if r.status_code >= 400:
         raise SharePointError(f"Site lookup failed ({r.status_code}): {r.text}")
     site_id = r.json()["id"]
 
-    r = requests.get(f"{GRAPH_ROOT}/sites/{site_id}/drives", headers=headers, timeout=30)
+    r = _get(f"{GRAPH_ROOT}/sites/{site_id}/drives", headers, 30)
     if r.status_code >= 400:
         raise SharePointError(f"Drives lookup failed ({r.status_code}): {r.text}")
     drives = r.json().get("value", [])
@@ -264,6 +264,36 @@ def create_bytes(remote_path: str, content: bytes) -> str | None:
 
 # --- read -------------------------------------------------------------------
 
+#: Attempts for a read (GET) that fails in transit or with a transient status.
+#: A read changes nothing, so retrying it is always safe. A connection reset
+#: part-way through a download (requests' ChunkedEncodingError) used to stop the
+#: app from starting.
+READ_ATTEMPTS = 4
+READ_RETRY_BASE_SECONDS = 2.0
+_TRANSIENT_STATUS = {429, 500, 502, 503, 504}
+
+
+def _get(url: str, headers: dict, timeout: float) -> requests.Response:
+    """``requests.get`` with retries on transport errors and transient statuses."""
+    for attempt in range(1, READ_ATTEMPTS + 1):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            if r.status_code not in _TRANSIENT_STATUS or attempt == READ_ATTEMPTS:
+                return r
+            try:
+                wait = float(r.headers.get("Retry-After") or 0)
+            except ValueError:
+                wait = 0.0
+            wait = wait or READ_RETRY_BASE_SECONDS * 2 ** (attempt - 1)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                requests.exceptions.ChunkedEncodingError):
+            if attempt == READ_ATTEMPTS:
+                raise
+            wait = READ_RETRY_BASE_SECONDS * 2 ** (attempt - 1)
+        time.sleep(min(wait, 60.0))
+    raise AssertionError("unreachable")
+
+
 def list_folder(remote_path: str) -> list[dict]:
     """List immediate children of a folder. Returns [] if the folder is missing.
 
@@ -274,7 +304,7 @@ def list_folder(remote_path: str) -> list[dict]:
     url = f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/children"
     items: list[dict] = []
     while url:
-        r = requests.get(url, headers=headers, timeout=60)
+        r = _get(url, headers, 60)
         if r.status_code == 404:
             return []
         if r.status_code >= 400:
@@ -294,7 +324,7 @@ def download_bytes(remote_path: str) -> bytes:
     drive_id, headers = _headers()
     path = remote_path.strip("/")
     url = f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}:/content"
-    r = requests.get(url, headers=headers, timeout=120)
+    r = _get(url, headers, 120)
     if r.status_code >= 400:
         raise SharePointError(f"Download of '{remote_path}' failed ({r.status_code}): {r.text}")
     return r.content
@@ -308,7 +338,7 @@ def etag(remote_path: str) -> str | None:
     """
     drive_id, headers = _headers()
     path = remote_path.strip("/")
-    r = requests.get(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers=headers, timeout=30)
+    r = _get(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers, 30)
     if r.status_code == 404:
         return None
     if r.status_code >= 400:
@@ -329,7 +359,7 @@ def download_with_etag(remote_path: str) -> tuple[bytes, str | None]:
 def exists(remote_path: str) -> bool:
     drive_id, headers = _headers()
     path = remote_path.strip("/")
-    r = requests.get(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers=headers, timeout=30)
+    r = _get(f"{GRAPH_ROOT}/drives/{drive_id}/root:/{path}", headers, 30)
     return r.status_code < 400
 
 
