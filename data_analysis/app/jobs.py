@@ -216,11 +216,15 @@ def _run(job_id: str, store: DefinitionStore, inputs: InputStore,
             store.record_kappa(code, new, headline)
             results.append({"code": code, "previous_kappa": _clean(prev), "new_kappa": new})
 
-        # Persist the completed re-analysis to SharePoint (RAM-only durability).
-        if config.MEMORY_DB:
-            state_sync.push_state()
-
         _update_job(job_id, status="done", message="Complete",
                     eta_seconds=0, results_json=json.dumps(results))
     except Exception as exc:  # noqa: BLE001
         _update_job(job_id, status="error", error=str(exc))
+
+    # Persist to SharePoint (RAM-only durability) only after the job's final
+    # status is written, so the job row travels in the same upload as its
+    # results. Pushing first left every finished job "running" in SharePoint's
+    # copy until some later re-analysis happened to push again; a restart before
+    # then would load it back as running.
+    if config.MEMORY_DB:
+        state_sync.push_state()
